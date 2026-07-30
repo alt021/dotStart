@@ -27,7 +27,7 @@
 
 ### 稳定发行版本
 
-1. 进入GitHub Release，下载`chrome-ext.zip`
+1. 进入GitHub Release，下载`Source Code(ZIP)`
 2. 将该压缩包解压至一个空文件夹
 3. 在扩展程序设置中启用`开发人员模式`
 4. 选中`加载已解压的扩展程序`，并选中该文件夹

@@ -56,7 +56,8 @@ const I18N = {
     line: "Line",
     bookmarks: "Bookmarks",
     bookmarksBar: "Bookmarks Bar",
-    otherBookmarks: "Other Bookmarks",
+    bookmarksMenu: "Bookmarks Menu",
+    otherBookmarks: "Other",
     folder: "Folder",
     history: "History",
     more: "More",
@@ -98,7 +99,8 @@ const I18N = {
     line: "\u6A2A\u7EBF",
     bookmarks: "\u4E66\u7B7E",
     bookmarksBar: "\u6536\u85CF\u5939\u680F",
-    otherBookmarks: "\u5176\u4ED6\u6536\u85CF\u5939",
+    bookmarksMenu: "\u4E66\u7B7E\u83DC\u5355",
+    otherBookmarks: "\u5176\u4ED6",
     folder: "\u6587\u4EF6\u5939",
     history: "\u5386\u53F2",
     more: "\u66F4\u591A",
@@ -119,6 +121,9 @@ function setStored(key, value) {
 function detectBrowserLang() {
   const nav = navigator.language || navigator.userLanguage || "";
   return nav.toLowerCase().startsWith("zh") ? "zh" : "en";
+}
+function isFirefox() {
+  return typeof browser !== "undefined" && browser.runtime;
 }
 function getLang() {
   const stored = localStorage.getItem(STORAGE_KEYS.lang);
@@ -214,6 +219,10 @@ function updateSearchStyle() {
 }
 function updateShortcuts() {
   const shortcuts = document.getElementById("shortcuts");
+  if (isFirefox()) {
+    if (shortcuts) shortcuts.style.display = "none";
+    return;
+  }
   const showShortcuts = getStored(STORAGE_KEYS.showShortcuts, ["true", "false"], "true") === "true";
   if (shortcuts) shortcuts.classList.toggle("hidden", !showShortcuts);
   const items = document.querySelectorAll(".shortcut-item[data-i18n]");
@@ -262,11 +271,12 @@ const ONBOARDING_I18N = {
          <div class="onboarding-subtitle">\u8BF7\u4ED4\u7EC6\u9605\u8BFB\u76F8\u5173\u8BF4\u660E</div>
          <div class="onboarding-scroll">
            <h3>\u6269\u5C55\u8BF4\u660E</h3>
-           <ol>
-             <li>\u672C\u9879\u76EE\u4E3AVibe Coding\u4EA7\u7269\uFF0C\u4EC5\u4F9B\u4F5C\u8005\u81EA\u7528\u3002\u4EE3\u7801\u8D28\u91CF\u8F83\u5DEE\uFF0C\u5982\u6709\u9700\u8981\u8BF7\u81EA\u884C\u91CD\u6784\u6216\u4FEE\u6539\u3002</li>
-             <li>\u672C\u6269\u5C55\u5B8C\u5168\u79BB\u7EBF\u8FD0\u884C\uFF0C\u4E0D\u6536\u96C6\u3001\u4E0A\u4F20\u6216\u5B58\u50A8\u4EFB\u4F55\u6709\u5173\u4E8E\u60A8\u7684\u6570\u636E\u6216\u4FE1\u606F\u3002</li>
-             <li>\u4E3A\u5B9E\u73B0\u5FEB\u6377\u65B9\u5F0F\u529F\u80FD\uFF0C\u672C\u6269\u5C55\u9700\u8981\u60A8\u7684\u5386\u53F2\u8BB0\u5F55\u548C\u4E66\u7B7E\u7684\u8BBF\u95EE\u6743\u9650\uFF0C\u6570\u636E\u4EC5\u5728\u672C\u5730\u5B58\u50A8\uFF0C\u4E0D\u4F1A\u88AB\u4E0A\u4F20\u6216\u6536\u96C6\u3002</li>
-           </ol>
+            <ol>
+              <li>\u672C\u9879\u76EE\u4E3AVibe Coding\u4EA7\u7269\uFF0C\u4EC5\u4F9B\u4F5C\u8005\u81EA\u7528\u3002\u4EE3\u7801\u8D28\u91CF\u8F83\u5DEE\uFF0C\u5982\u6709\u9700\u8981\u8BF7\u81EA\u884C\u91CD\u6784\u6216\u4FEE\u6539\u3002</li>
+              <li>\u672C\u6269\u5C55\u5B8C\u5168\u79BB\u7EBF\u8FD0\u884C\uFF0C\u4E0D\u6536\u96C6\u3001\u4E0A\u4F20\u6216\u5B58\u50A8\u4EFB\u4F55\u6709\u5173\u4E8E\u60A8\u7684\u6570\u636E\u6216\u4FE1\u606F\u3002</li>
+              <li>\u4E3A\u5B9E\u73B0\u5FEB\u6377\u65B9\u5F0F\u529F\u80FD\uFF0C\u672C\u6269\u5C55\u9700\u8981\u60A8\u7684\u5386\u53F2\u8BB0\u5F55\u548C\u4E66\u7B7E\u7684\u8BBF\u95EE\u6743\u9650\uFF0C\u6570\u636E\u4EC5\u5728\u672C\u5730\u5B58\u50A8\uFF0C\u4E0D\u4F1A\u88AB\u4E0A\u4F20\u6216\u6536\u96C6\u3002</li>
+              <li>\u4E3A\u4FDD\u8BC1\u517C\u5BB9\u6027\uFF0C\u6269\u5C55\u7533\u8BF7\u4E86\u66F4\u591A\u6570\u636E\u6743\u9650\uFF0C\u4F46\u5BF9\u5E94\u7684\u529F\u80FD\u4E0D\u5728\u6240\u6709\u6D4F\u89C8\u5668\u4E2D\u53EF\u7528\u3002\u6240\u6709\u8BFB\u53D6\u7684\u6570\u636E\u6C38\u8FDC\u4E0D\u4F1A\u79BB\u5F00\u60A8\u7684\u8BA1\u7B97\u673A\uFF0C\u4E5F\u4E0D\u4F1A\u88AB\u4E0A\u4F20\u3002</li>
+            </ol>
            <h3>\u5F00\u6E90\u8BF4\u660E</h3>
            <pre style="white-space:pre-wrap;font-family:inherit;margin:0.5rem 0">${escapeHTML(MIT_LICENSE)}</pre>
          </div>
@@ -297,11 +307,12 @@ const ONBOARDING_I18N = {
          <div class="onboarding-subtitle">Please read the following carefully</div>
          <div class="onboarding-scroll">
            <h3>About This Extension</h3>
-           <ol>
-             <li>This project is a Vibe Coding product, intended for personal use only. Code quality may be poor \u2014 feel free to refactor or modify as needed.</li>
-             <li>This extension runs entirely offline. It does not collect, upload, or store any of your data or information.</li>
-             <li>To enable shortcuts, this extension requires access to your history and bookmarks. Data is stored locally only and is never uploaded or collected.</li>
-           </ol>
+            <ol>
+              <li>This project is a Vibe Coding product, intended for personal use only. Code quality may be poor \u2014 feel free to refactor or modify as needed.</li>
+              <li>This extension runs entirely offline. It does not collect, upload, or store any of your data or information.</li>
+              <li>To enable shortcuts, this extension requires access to your history and bookmarks. Data is stored locally only and is never uploaded or collected.</li>
+              <li>For compatibility, this extension requests additional data permissions, but the corresponding features are not available in all browsers. All read data never leaves your computer and is never uploaded.</li>
+            </ol>
            <h3>Open Source License</h3>
            <pre style="white-space:pre-wrap;font-family:inherit;margin:0.5rem 0">${escapeHTML(MIT_LICENSE)}</pre>
          </div>
@@ -440,7 +451,7 @@ function showSidebar(type) {
   overlay.classList.add("visible");
   panel.classList.add("visible");
 }
-function loadBookmarksSidebar(container) {
+async function loadBookmarksSidebar(container) {
   container.innerHTML = "";
   const tabBar = document.createElement("div");
   tabBar.className = "sidebar-tabs";
@@ -449,12 +460,44 @@ function loadBookmarksSidebar(container) {
   tabBar.appendChild(indicator);
   const content = document.createElement("div");
   content.className = "sidebar-bookmark-content";
-  const tabs = [
-    { id: "1", label: t("bookmarksBar") },
-    { id: "2", label: t("otherBookmarks") }
-  ];
+  let tabs;
+  if (isFirefox()) {
+    try {
+      const result = await chrome.bookmarks.getTree();
+      const root = result[0];
+      const children = root.children || [];
+      const findFolder = (nodes, title) => {
+        for (const node of nodes) {
+          if (node.title === title) return node;
+          if (node.children) {
+            const found = findFolder(node.children, title);
+            if (found) return found;
+          }
+        }
+        return null;
+      };
+      const bar = findFolder(children, "Bookmarks Toolbar") || findFolder(children, "\u4E66\u7B7E\u5DE5\u5177\u680F");
+      const menu = findFolder(children, "Bookmarks Menu") || findFolder(children, "\u4E66\u7B7E\u83DC\u5355");
+      const other = findFolder(children, "Unfiled Bookmarks") || findFolder(children, "\u5176\u4ED6\u4E66\u7B7E") || findFolder(children, "Other Bookmarks") || findFolder(children, "\u5176\u4ED6");
+      tabs = [];
+      if (bar) tabs.push({ id: bar.id, label: t("bookmarksBar") });
+      if (menu) tabs.push({ id: menu.id, label: t("bookmarksMenu") });
+      if (other) tabs.push({ id: other.id, label: t("otherBookmarks") });
+    } catch {
+      tabs = [
+        { id: "1", label: t("bookmarksBar") },
+        { id: "2", label: t("bookmarksMenu") },
+        { id: "3", label: t("otherBookmarks") }
+      ];
+    }
+  } else {
+    tabs = [
+      { id: "1", label: t("bookmarksBar") },
+      { id: "2", label: t("otherBookmarks") }
+    ];
+  }
   const tabBtns = [];
-  let currentFolderId = "1";
+  let currentFolderId = tabs[0]?.id;
   function moveIndicator(activeBtn) {
     const tabRect = tabBar.getBoundingClientRect();
     const btnRect = activeBtn.getBoundingClientRect();
@@ -473,7 +516,7 @@ function loadBookmarksSidebar(container) {
   }
   for (const tab of tabs) {
     const btn = document.createElement("button");
-    btn.className = "sidebar-tab" + (tab.id === "1" ? " active" : "");
+    btn.className = "sidebar-tab" + (tab.id === currentFolderId ? " active" : "");
     btn.textContent = tab.label;
     btn.addEventListener("click", () => switchTab(tab.id, btn));
     tabBar.appendChild(btn);
@@ -485,7 +528,7 @@ function loadBookmarksSidebar(container) {
     const activeBtn = tabBtns.find((b) => b.classList.contains("active"));
     if (activeBtn) moveIndicator(activeBtn);
   });
-  loadBookmarksContent(content, "1");
+  if (currentFolderId) loadBookmarksContent(content, currentFolderId);
 }
 async function loadBookmarksContent(container, folderId) {
   container.innerHTML = "";
@@ -665,7 +708,7 @@ function getMenuHTML() {
         ${t("showGo")}
       </span>
     </button>
-    <button class="menu-item" data-action="toggle-shortcuts">
+    <button class="menu-item" data-action="toggle-shortcuts" ${isFirefox() ? 'style="display:none"' : ""}>
       <span class="menu-label">
         <span class="menu-check ${showShortcuts ? "checked" : ""}">${showShortcuts ? "&#10003;" : ""}</span>
         ${t("showShortcuts")}
@@ -1041,18 +1084,9 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     });
 
-    const GUIDE_CONTENT_ZH = `**dotStart** 2.0.0
+    const GUIDE_CONTENT_ZH = `**dotStart** 2.1.0
 
 一个 现代 · 极简 · 干净 的新标签页
-
-
-**# 发行日志**
-
-// rel#2.0.0-20260730
-  **新增** 条纹背景模式
-  **优化** 修改项目主视觉效果
-  **优化** 移除对npm的依赖
-  **修复** 使用引导适配深色模式
 
 
 **# 仓库**
@@ -1069,20 +1103,23 @@ Xiaomi MiMO
 
 **# 联系我们**
 
-alts.tech@hotmail.com`;
-
-    const GUIDE_CONTENT_EN = `**dotStart** 2.0.0
-
-A modern · minimal · clean new tab page
+alts.tech@hotmail.com
 
 
-**# Release Note**
+**# 发行日志**
+
+// rel#2.1.0-20260812
+  **修复** 适配Firefox浏览器
 
 // rel#2.0.0-20260730
-  **Added** Stripe background mode
-  **Improved** Modified main visual effect
-  **Improved** Removed npm dependency
-  **Fixed** Onboarding adapted for dark mode
+  **新增** 条纹背景模式
+  **修复** 修改项目主视觉效果
+  **修复** 移除对npm的依赖
+  **修复** 使用引导适配深色模式`;
+
+    const GUIDE_CONTENT_EN = `**dotStart** 2.1.0
+
+A modern · minimal · clean new tab page
 
 
 **# Repository**
@@ -1099,7 +1136,19 @@ Xiaomi MiMO
 
 **# Contact**
 
-alts.tech@hotmail.com`;
+alts.tech@hotmail.com
+
+
+**# Release Note**
+
+// rel#2.1.0-20260812
+  **Fixed** Firefox browser compatibility
+
+// rel#2.0.0-20260730
+  **Added** Stripe background mode
+  **Fixed** Modified main visual effect
+  **Fixed** Removed npm dependency
+  **Fixed** Onboarding adapted for dark mode`;
 
     let searchClickCount = 0;
     let searchClickTimer = null;

@@ -4,7 +4,6 @@ const STORAGE_KEYS = {
   showTime: "showTime",
   showGo: "showGo",
   searchEngine: "searchEngine",
-  showDots: "showDots",
   backgroundStyle: "backgroundStyle",
   lang: "lang",
   clockFormat: "clockFormat",
@@ -44,7 +43,7 @@ const I18N = {
     baidu: "Baidu",
     language: "Language",
     english: "English",
-    chinese: "\u4E2D\u6587",
+    chinese: "中文",
     clockFormat: "Clock Format",
     clock12h: "12-hour",
     clock24h: "24-hour",
@@ -62,50 +61,52 @@ const I18N = {
     history: "History",
     more: "More",
     downloads: "Downloads",
-    extensions: "Extensions"
+    extensions: "Extensions",
+    permissionNeeded: "Permission needed to read your data — allow access and try again"
   },
   zh: {
-    searchTitle: "\u663E\u793A\u6807\u9898",
-    timeDisplay: "\u65F6\u95F4\u663E\u793A",
-    showGo: "\u641C\u7D22\u6309\u94AE",
-    background: "\u80CC\u666F",
-    blankBackground: "\u7A7A\u767D",
-    dotBackground: "\u70B9\u9635",
-    stripeBackground: "\u6761\u7EB9",
-    showShortcuts: "\u5FEB\u6377\u65B9\u5F0F",
-    clickEffects: "\u70B9\u51FB\u7279\u6548",
-    theme: "\u4E3B\u9898",
-    auto: "\u81EA\u52A8",
-    light: "\u6D45\u8272",
-    dark: "\u6DF1\u8272",
-    searchEngine: "\u641C\u7D22\u5F15\u64CE",
-    browserDefault: "\u8DDF\u968F\u6D4F\u89C8\u5668",
+    searchTitle: "显示标题",
+    timeDisplay: "时间显示",
+    showGo: "搜索按钮",
+    background: "背景",
+    blankBackground: "空白",
+    dotBackground: "点阵",
+    stripeBackground: "条纹",
+    showShortcuts: "快捷方式",
+    clickEffects: "点击特效",
+    theme: "主题",
+    auto: "自动",
+    light: "浅色",
+    dark: "深色",
+    searchEngine: "搜索引擎",
+    browserDefault: "跟随浏览器",
     google: "Google",
     duckduckgo: "DuckDuckGo",
     qwant: "Qwant",
     bing: "Bing",
-    baidu: "\u767E\u5EA6",
-    language: "\u8BED\u8A00",
+    baidu: "百度",
+    language: "语言",
     english: "English",
-    chinese: "\u4E2D\u6587",
-    clockFormat: "\u65F6\u949F\u683C\u5F0F",
-    clock12h: "12\u5C0F\u65F6\u5236",
-    clock24h: "24\u5C0F\u65F6\u5236",
-    placeholder: "\u8F93\u5165\u641C\u7D22\u5185\u5BB9...",
-    go: "\u524D\u5F80",
-    searchStyle: "\u641C\u7D22\u6846\u6837\u5F0F",
-    square: "\u65B9\u5F62",
-    rounded: "\u5706\u89D2\u77E9\u5F62",
-    line: "\u6A2A\u7EBF",
-    bookmarks: "\u4E66\u7B7E",
-    bookmarksBar: "\u6536\u85CF\u5939\u680F",
-    bookmarksMenu: "\u4E66\u7B7E\u83DC\u5355",
-    otherBookmarks: "\u5176\u4ED6",
-    folder: "\u6587\u4EF6\u5939",
-    history: "\u5386\u53F2",
-    more: "\u66F4\u591A",
-    downloads: "\u4E0B\u8F7D",
-    extensions: "\u6269\u5C55"
+    chinese: "中文",
+    clockFormat: "时钟格式",
+    clock12h: "12小时制",
+    clock24h: "24小时制",
+    placeholder: "输入搜索内容...",
+    go: "前往",
+    searchStyle: "搜索框样式",
+    square: "方形",
+    rounded: "圆角矩形",
+    line: "横线",
+    bookmarks: "书签",
+    bookmarksBar: "收藏夹栏",
+    bookmarksMenu: "书签菜单",
+    otherBookmarks: "其他",
+    folder: "文件夹",
+    history: "历史",
+    more: "更多",
+    downloads: "下载",
+    extensions: "扩展",
+    permissionNeeded: "需要授权才能读取数据，请允许后重试"
   }
 };
 function t(key) {
@@ -118,12 +119,63 @@ function getStored(key, valid, fallback) {
 function setStored(key, value) {
   localStorage.setItem(key, value);
 }
+// One-time migration: older versions stored "showDots" instead of "backgroundStyle".
+function migrateLegacySettings() {
+  try {
+    if (localStorage.getItem(STORAGE_KEYS.backgroundStyle) === null &&
+        localStorage.getItem("showDots") === "true") {
+      localStorage.setItem(STORAGE_KEYS.backgroundStyle, "dots");
+    }
+    localStorage.removeItem("showDots");
+  } catch (_) { /* localStorage may be unavailable */ }
+}
 function detectBrowserLang() {
   const nav = navigator.language || navigator.userLanguage || "";
   return nav.toLowerCase().startsWith("zh") ? "zh" : "en";
 }
 function isFirefox() {
-  return typeof browser !== "undefined" && browser.runtime;
+  return typeof browser !== "undefined" && typeof browser.runtime?.getBrowserInfo === "function";
+}
+// "bookmarks" and "history" live in optional_permissions so that neither Chrome
+// nor Firefox asks for them at install time; they are requested the first time
+// the user opens the matching sidebar panel. A request that is already granted
+// resolves true without prompting, so calling this on every open is cheap.
+//
+// Both browsers only honour the request while a user gesture is active, so
+// callers MUST invoke this synchronously from the event handler and only attach
+// .then() afterwards -- awaiting anything first drops the gesture in Firefox.
+function requestPermissions(perms) {
+  const promiseApi = (typeof browser !== "undefined" && browser.permissions && browser.permissions.request)
+    ? browser.permissions
+    : null;
+  if (promiseApi) {
+    try {
+      const result = promiseApi.request({ permissions: perms });
+      if (result && typeof result.then === "function") {
+        return result.then((granted) => !!granted, () => false);
+      }
+    } catch (_) { /* fall through to the chrome namespace */ }
+  }
+  if (typeof chrome === "undefined" || !chrome.permissions || !chrome.permissions.request) {
+    return Promise.resolve(true);
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (granted) => {
+      if (settled) return;
+      settled = true;
+      resolve(!!granted);
+    };
+    try {
+      const result = chrome.permissions.request({ permissions: perms }, (granted) => {
+        if (chrome.runtime && chrome.runtime.lastError) void chrome.runtime.lastError;
+        finish(granted);
+      });
+      if (result && typeof result.then === "function") result.then(finish, () => finish(false));
+    } catch (_) {
+      finish(false);
+    }
+  });
 }
 function getLang() {
   const stored = localStorage.getItem(STORAGE_KEYS.lang);
@@ -160,8 +212,7 @@ function updateTime() {
 }
 function updateDots() {
   const stored = localStorage.getItem(STORAGE_KEYS.backgroundStyle);
-  const fallback = getStored(STORAGE_KEYS.showDots, ["true", "false"], "true") === "true" ? "dots" : "blank";
-  const backgroundStyle = stored === "blank" || stored === "dots" || stored === "stripes" ? stored : fallback;
+  const backgroundStyle = stored === "blank" || stored === "dots" || stored === "stripes" ? stored : "blank";
   document.body.classList.remove("bg-blank", "bg-dots", "bg-stripes");
   document.body.classList.add(`bg-${backgroundStyle}`);
 }
@@ -217,6 +268,13 @@ function updateSearchStyle() {
   form.classList.remove("style-square", "style-rounded", "style-line");
   form.classList.add(`style-${style}`);
 }
+// Every entry in this row opens a chrome:// page, so the row is Chrome-only:
+// Firefox rejects chrome: URLs in tabs.create (and privileged about: URLs too)
+// and there is no equivalent page for downloads or extensions to point at, so
+// there is no Firefox-side implementation worth shipping. The whole row is
+// hidden there rather than reduced to the subset that happens to work -- and
+// with it the menu toggle, which would otherwise flip a permanently invisible
+// element.
 function updateShortcuts() {
   const shortcuts = document.getElementById("shortcuts");
   if (isFirefox()) {
@@ -236,64 +294,115 @@ function escapeHTML(str) {
   div.textContent = str;
   return div.innerHTML;
 }
-const MIT_LICENSE = `MIT License
+const LICENSE_PLACEHOLDER = "__LICENSE_PLACEHOLDER__";
+let cachedLicenseText = null;
+async function loadLicenseText() {
+  if (cachedLicenseText !== null) return cachedLicenseText;
+  try {
+    const url = (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.getURL)
+      ? chrome.runtime.getURL("LICENSE")
+      : "LICENSE";
+    const res = await fetch(url);
+    cachedLicenseText = await res.text();
+  } catch (e) {
+    cachedLicenseText = "";
+  }
+  return cachedLicenseText;
+}
+// Easter-egg text, hard-coded on purpose: the shipped extension carries no loose
+// data file for this. EASTER.MD in the repository root is the editable working
+// copy — when it changes, update this constant to match (keep it a verbatim copy,
+// including the {{version}} placeholder, which is substituted at render time).
+const EASTER_CONTENT = `**dotStart** {{version}}
 
-Copyright (c) 2025 AmeXE2
+一个 现代 · 极简 · 干净 的新标签页
+A modern · minimal · clean new tab page
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+**# 仓库 Repository**
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.`;
+https://github.com/alt021/dotStart
+
+
+**# 制作者 Creator**
+
+AmeXE2
+ChatGPT
+Xiaomi MiMO
+
+
+**# 联系我们 Contact**
+
+alts.tech@hotmail.com
+
+
+**# 发行日志 Release Notes**
+
+// rel#2.1.0-20260911-Hotfix
+  **修复** 解决Firefox和Chrome机制冲突问题
+  **Fixed** Resolved Firefox/Chrome mechanism conflict
+
+// rel#2.1.0-20260812
+  **修复** 适配Firefox浏览器
+  **Fixed** Firefox browser compatibility
+
+// rel#2.0.0-20260730
+  **新增** 条纹背景模式
+  **Added** Stripe background mode
+  **修复** 修改项目主视觉效果
+  **Fixed** Modified main visual effect
+  **修复** 移除对npm的依赖
+  **Fixed** Removed npm dependency
+  **修复** 使用引导适配深色模式
+  **Fixed** Onboarding adapted for dark mode`;
+
+// Crawl speed of the Easter egg in device pixels per second. The element has to
+// travel its own height plus one viewport to fully leave the screen, so
+// showEasterEgg() derives the animation duration from that distance.
+const EASTER_CRAWL_SPEED = 150;
+
+function getRuntimeVersion() {
+  return (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.getManifest)
+    ? chrome.runtime.getManifest().version
+    : "dev";
+}
 let onboardingStep = 0;
 const ONBOARDING_I18N = {
   zh: {
     pages: [
       `<div class="onboarding-center">
          <div class="onboarding-emoji">\u{1F44B}</div>
-          <div class="onboarding-title">\u6B22\u8FCE\u4F7F\u7528dotStart</div>
-         <div class="onboarding-subtitle">\u4E00\u4E2A\u73B0\u4EE3 \xB7 \u6781\u7B80 \xB7 \u7EAF\u51C0\u7684\u6D4F\u89C8\u5668\u4E3B\u9875</div>
+          <div class="onboarding-title">欢迎使用dotStart</div>
+         <div class="onboarding-subtitle">一个现代 \xB7 极简 \xB7 纯净的浏览器主页</div>
        </div>`,
       `<div class="onboarding-col">
-         <div class="onboarding-title">\u5F00\u6E90\u8BF4\u660E\u4E0E\u4F7F\u7528\u8BB8\u53EF</div>
-         <div class="onboarding-subtitle">\u8BF7\u4ED4\u7EC6\u9605\u8BFB\u76F8\u5173\u8BF4\u660E</div>
+         <div class="onboarding-title">开源说明与使用许可</div>
+         <div class="onboarding-subtitle">请仔细阅读相关说明</div>
          <div class="onboarding-scroll">
-           <h3>\u6269\u5C55\u8BF4\u660E</h3>
+           <h3>扩展说明</h3>
             <ol>
-              <li>\u672C\u9879\u76EE\u4E3AVibe Coding\u4EA7\u7269\uFF0C\u4EC5\u4F9B\u4F5C\u8005\u81EA\u7528\u3002\u4EE3\u7801\u8D28\u91CF\u8F83\u5DEE\uFF0C\u5982\u6709\u9700\u8981\u8BF7\u81EA\u884C\u91CD\u6784\u6216\u4FEE\u6539\u3002</li>
-              <li>\u672C\u6269\u5C55\u5B8C\u5168\u79BB\u7EBF\u8FD0\u884C\uFF0C\u4E0D\u6536\u96C6\u3001\u4E0A\u4F20\u6216\u5B58\u50A8\u4EFB\u4F55\u6709\u5173\u4E8E\u60A8\u7684\u6570\u636E\u6216\u4FE1\u606F\u3002</li>
-              <li>\u4E3A\u5B9E\u73B0\u5FEB\u6377\u65B9\u5F0F\u529F\u80FD\uFF0C\u672C\u6269\u5C55\u9700\u8981\u60A8\u7684\u5386\u53F2\u8BB0\u5F55\u548C\u4E66\u7B7E\u7684\u8BBF\u95EE\u6743\u9650\uFF0C\u6570\u636E\u4EC5\u5728\u672C\u5730\u5B58\u50A8\uFF0C\u4E0D\u4F1A\u88AB\u4E0A\u4F20\u6216\u6536\u96C6\u3002</li>
-              <li>\u4E3A\u4FDD\u8BC1\u517C\u5BB9\u6027\uFF0C\u6269\u5C55\u7533\u8BF7\u4E86\u66F4\u591A\u6570\u636E\u6743\u9650\uFF0C\u4F46\u5BF9\u5E94\u7684\u529F\u80FD\u4E0D\u5728\u6240\u6709\u6D4F\u89C8\u5668\u4E2D\u53EF\u7528\u3002\u6240\u6709\u8BFB\u53D6\u7684\u6570\u636E\u6C38\u8FDC\u4E0D\u4F1A\u79BB\u5F00\u60A8\u7684\u8BA1\u7B97\u673A\uFF0C\u4E5F\u4E0D\u4F1A\u88AB\u4E0A\u4F20\u3002</li>
+              <li>本项目为Vibe Coding产物，仅供作者自用。代码质量较差，如有需要请自行重构或修改。</li>
+              <li>本扩展完全离线运行，不收集、上传或存储任何有关于您的数据或信息。</li>
+              <li>为实现快捷方式功能，本扩展需要您的历史记录和书签的访问权限，数据仅在本地存储，不会被上传或收集。</li>
+              <li>为保证兼容性，扩展申请了更多数据权限，但对应的功能不在所有浏览器中可用。所有读取的数据永远不会离开您的计算机，也不会被上传。</li>
             </ol>
-           <h3>\u5F00\u6E90\u8BF4\u660E</h3>
-           <pre style="white-space:pre-wrap;font-family:inherit;margin:0.5rem 0">${escapeHTML(MIT_LICENSE)}</pre>
+           <h3>开源说明</h3>
+           <pre style="white-space:pre-wrap;font-family:inherit;margin:0.5rem 0">${escapeHTML(LICENSE_PLACEHOLDER)}</pre>
          </div>
        </div>`,
       `<div class="onboarding-col">
-         <div class="onboarding-title">\u4F7F\u7528\u65B9\u6CD5</div>
-         <div class="onboarding-subtitle">\u70B9\u6309\u53F3\u952E\u6253\u5F00\u8BBE\u7F6E\u83DC\u5355</div>
-         <img class="onboarding-img onboarding-img-light" src="scrshot-light.png" alt="\u53F3\u952E\u83DC\u5355\u622A\u56FE">
-         <img class="onboarding-img onboarding-img-dark" src="scrshot-dark.png" alt="\u53F3\u952E\u83DC\u5355\u622A\u56FE">
+         <div class="onboarding-title">使用方法</div>
+         <div class="onboarding-subtitle">点按右键打开设置菜单</div>
+         <img class="onboarding-img onboarding-img-light" src="scrshot-light.png" alt="右键菜单截图">
+         <img class="onboarding-img onboarding-img-dark" src="scrshot-dark.png" alt="右键菜单截图">
        </div>`,
       `<div class="onboarding-center">
          <div class="onboarding-emoji">\u{1F389}</div>
-         <div class="onboarding-title">\u6B22\u8FCE\u4F7F\u7528</div>
+         <div class="onboarding-title">欢迎使用</div>
        </div>`
     ],
-    btns: ["\u5F00\u59CB", "\u540C\u610F", "\u7EE7\u7EED", "\u5B8C\u6210"],
-    hint: "\u6EDA\u52A8\u9605\u8BFB\u81F3\u5E95\u90E8\u540E\u53EF\u8FDB\u884C\u4E0B\u4E00\u6B65"
+    btns: ["开始", "同意", "继续", "完成"],
+    hint: "滚动阅读至底部后可进行下一步"
   },
   en: {
     pages: [
@@ -308,13 +417,13 @@ const ONBOARDING_I18N = {
          <div class="onboarding-scroll">
            <h3>About This Extension</h3>
             <ol>
-              <li>This project is a Vibe Coding product, intended for personal use only. Code quality may be poor \u2014 feel free to refactor or modify as needed.</li>
+              <li>This project is a Vibe Coding product, intended for personal use only. Code quality may be poor — feel free to refactor or modify as needed.</li>
               <li>This extension runs entirely offline. It does not collect, upload, or store any of your data or information.</li>
               <li>To enable shortcuts, this extension requires access to your history and bookmarks. Data is stored locally only and is never uploaded or collected.</li>
               <li>For compatibility, this extension requests additional data permissions, but the corresponding features are not available in all browsers. All read data never leaves your computer and is never uploaded.</li>
             </ol>
            <h3>Open Source License</h3>
-           <pre style="white-space:pre-wrap;font-family:inherit;margin:0.5rem 0">${escapeHTML(MIT_LICENSE)}</pre>
+           <pre style="white-space:pre-wrap;font-family:inherit;margin:0.5rem 0">${escapeHTML(LICENSE_PLACEHOLDER)}</pre>
          </div>
        </div>`,
       `<div class="onboarding-col">
@@ -332,10 +441,11 @@ const ONBOARDING_I18N = {
     hint: "Scroll to the bottom to proceed"
   }
 };
-function showOnboarding() {
+async function showOnboarding() {
   if (localStorage.getItem("onboardingDone") === "true") return;
   const lang = getLang();
   const ob = ONBOARDING_I18N[lang];
+  const licenseText = escapeHTML(await loadLicenseText());
   const overlay = document.createElement("div");
   overlay.className = "onboarding-overlay";
   overlay.id = "onboarding-overlay";
@@ -347,7 +457,7 @@ function showOnboarding() {
   ob.pages.forEach((html, i) => {
     const panel = document.createElement("div");
     panel.className = "onboarding-panel";
-    panel.innerHTML = html;
+    panel.innerHTML = html.split(LICENSE_PLACEHOLDER).join(licenseText);
     panel.style.transform = `translateX(${i * 100}%)`;
     slider.appendChild(panel);
     panels.push(panel);
@@ -416,18 +526,32 @@ function hideSidebar() {
   if (overlay) overlay.classList.remove("visible");
   if (panel) panel.classList.remove("visible");
 }
-function showSidebar(type) {
+// Sidebar data comes from optional permissions, so the grant is requested on
+// first open (inside the click handler, see requestPermissions). The panel opens
+// either way: a refusal renders an explanation instead of appearing to do nothing.
+function openSidebar(type) {
+  const requested = requestPermissions([type === "bookmarks" ? "bookmarks" : "history"]);
+  requested.then((granted) => showSidebar(type, granted));
+}
+function showSidebar(type, granted) {
   const overlay = document.getElementById("sidebar-overlay");
   const panel = document.getElementById("sidebar-panel");
   const title = panel?.querySelector(".sidebar-header h3");
   const content = panel?.querySelector(".sidebar-content");
   const footerLink = panel?.querySelector(".sidebar-footer-link");
+  const footer = panel?.querySelector(".sidebar-footer");
   const moreBtn = document.getElementById("sidebar-more");
   if (!overlay || !panel || !content) return;
   if (title) title.textContent = type === "bookmarks" ? t("bookmarks") : t("history");
   content.innerHTML = "";
   const chromeUrl = type === "bookmarks" ? "chrome://bookmarks" : "chrome://history";
+  // These two affordances open the browser's own manager, which is a chrome://
+  // page. Firefox rejects chrome: URLs in tabs.create and has no equivalent
+  // page, so they are Chrome-only. (Firefox cannot reach this panel at all --
+  // its only entry point, the shortcuts row, is hidden on that engine too.)
+  const externalLinks = !isFirefox();
   if (moreBtn) {
+    moreBtn.style.display = externalLinks ? "" : "none";
     moreBtn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M6.25 4.5A1.75 1.75 0 0 0 4.5 6.25v11.5c0 .966.783 1.75 1.75 1.75h11.5a1.75 1.75 0 0 0 1.75-1.75v-4a.75.75 0 0 1 1.5 0v4A3.25 3.25 0 0 1 17.75 21H6.25A3.25 3.25 0 0 1 3 17.75V6.25A3.25 3.25 0 0 1 6.25 3h4a.75.75 0 0 1 0 1.5h-4ZM13 3.75a.75.75 0 0 1 .75-.75h6.5a.75.75 0 0 1 .75.75v6.5a.75.75 0 0 1-1.5 0V5.56l-5.22 5.22a.75.75 0 0 1-1.06-1.06l5.22-5.22h-4.69a.75.75 0 0 1-.75-.75Z"/></svg>';
     moreBtn.title = t("more");
     moreBtn.onclick = () => {
@@ -436,6 +560,7 @@ function showSidebar(type) {
       }
     };
   }
+  if (footer) footer.style.display = externalLinks ? "" : "none";
   if (footerLink) {
     footerLink.onclick = () => {
       if (typeof chrome !== "undefined" && chrome.tabs) {
@@ -443,7 +568,9 @@ function showSidebar(type) {
       }
     };
   }
-  if (type === "bookmarks") {
+  if (!granted) {
+    content.innerHTML = `<div class="sidebar-empty">${escapeHTML(t("permissionNeeded"))}</div>`;
+  } else if (type === "bookmarks") {
     loadBookmarksSidebar(content);
   } else {
     loadHistory(content);
@@ -476,9 +603,9 @@ async function loadBookmarksSidebar(container) {
         }
         return null;
       };
-      const bar = findFolder(children, "Bookmarks Toolbar") || findFolder(children, "\u4E66\u7B7E\u5DE5\u5177\u680F");
-      const menu = findFolder(children, "Bookmarks Menu") || findFolder(children, "\u4E66\u7B7E\u83DC\u5355");
-      const other = findFolder(children, "Unfiled Bookmarks") || findFolder(children, "\u5176\u4ED6\u4E66\u7B7E") || findFolder(children, "Other Bookmarks") || findFolder(children, "\u5176\u4ED6");
+      const bar = findFolder(children, "Bookmarks Toolbar") || findFolder(children, "书签工具栏");
+      const menu = findFolder(children, "Bookmarks Menu") || findFolder(children, "书签菜单");
+      const other = findFolder(children, "Unfiled Bookmarks") || findFolder(children, "其他书签") || findFolder(children, "Other Bookmarks") || findFolder(children, "其他");
       tabs = [];
       if (bar) tabs.push({ id: bar.id, label: t("bookmarksBar") });
       if (menu) tabs.push({ id: menu.id, label: t("bookmarksMenu") });
@@ -671,11 +798,14 @@ function search(query) {
     return;
   }
   const engine = getStored(STORAGE_KEYS.searchEngine, SEARCH_ENGINES, "browser");
-  if (engine === "browser" && typeof chrome !== "undefined" && chrome.search) {
+  if (engine === "browser" && typeof chrome !== "undefined" && chrome.search && typeof chrome.search.query === "function") {
     chrome.search.query({ text: query });
-  } else if (engine in SEARCH_URLS) {
-    window.location.href = SEARCH_URLS[engine] + encodeURIComponent(query);
+    return;
   }
+  // Fallback: "browser" engine has no usable provider here (Firefox, or Chrome <87).
+  // Route to google unless another explicit engine is selected.
+  const fallback = engine && engine !== "browser" && SEARCH_URLS[engine] ? engine : "google";
+  window.location.href = SEARCH_URLS[fallback] + encodeURIComponent(query);
 }
 function getMenuHTML() {
   const showTitle = getStored(STORAGE_KEYS.showTitle, ["true", "false"], "true") === "true";
@@ -683,7 +813,7 @@ function getMenuHTML() {
   const showGo = getStored(STORAGE_KEYS.showGo, ["true", "false"], "true") === "true";
   const showShortcuts = getStored(STORAGE_KEYS.showShortcuts, ["true", "false"], "true") === "true";
   const showClickFx = getStored(STORAGE_KEYS.showClickFx, ["true", "false"], "true") === "true";
-  const backgroundStyle = getStored(STORAGE_KEYS.backgroundStyle, ["blank", "dots", "stripes"], getStored(STORAGE_KEYS.showDots, ["true", "false"], "true") === "true" ? "dots" : "blank");
+  const backgroundStyle = getStored(STORAGE_KEYS.backgroundStyle, ["blank", "dots", "stripes"], "blank");
   const theme = getStored(STORAGE_KEYS.theme, ["auto", "light", "dark"], "auto");
   const engine = getStored(STORAGE_KEYS.searchEngine, SEARCH_ENGINES, "browser");
   const lang = getLang();
@@ -779,7 +909,7 @@ function getMenuHTML() {
         <span class="menu-arrow">&#9656;</span>
       </button>
       <div class="menu-submenu">
-        <button class="menu-item" data-action="set-engine" data-value="browser">
+        <button class="menu-item" data-action="set-engine" data-value="browser" ${isFirefox() ? 'style="display:none"' : ""}>
           <span class="menu-label">
             <span class="menu-radio ${engine === "browser" ? "selected" : ""}"></span>
             ${t("browserDefault")}
@@ -890,8 +1020,9 @@ function refreshMenu() {
   if (menu) menu.innerHTML = getMenuHTML();
 }
 let menuVisible = false;
-document.addEventListener("DOMContentLoaded", () => {
-  document.title = getLang() === "zh" ? "\u65B0\u6807\u7B7E\u9875" : "New tab";
+document.addEventListener("DOMContentLoaded", async () => {
+  migrateLegacySettings();
+  document.title = getLang() === "zh" ? "新标签页" : "New tab";
   applyTheme(getStored(STORAGE_KEYS.theme, ["auto", "light", "dark"], "auto"));
   const app = document.getElementById("app");
   if (app) {
@@ -923,7 +1054,7 @@ document.addEventListener("DOMContentLoaded", () => {
     updateShortcuts();
     updateClickFx();
     setInterval(updateTime, 1e3);
-    showOnboarding();
+    showOnboarding().catch((e) => console.error("onboarding failed:", e));
     const menu = document.createElement("div");
     menu.className = "context-menu";
     menu.id = "context-menu";
@@ -1046,7 +1177,7 @@ document.addEventListener("DOMContentLoaded", () => {
             break;
           case "set-lang":
             setStored(STORAGE_KEYS.lang, value);
-            document.title = value === "zh" ? "\u65B0\u6807\u7B7E\u9875" : "New tab";
+            document.title = value === "zh" ? "新标签页" : "New tab";
             updateUI();
             refreshMenu();
             break;
@@ -1075,80 +1206,14 @@ document.addEventListener("DOMContentLoaded", () => {
         e.preventDefault();
         const url = item.getAttribute("data-url");
         if (url === "chrome://bookmarks") {
-          showSidebar("bookmarks");
+          openSidebar("bookmarks");
         } else if (url === "chrome://history") {
-          showSidebar("history");
+          openSidebar("history");
         } else if (url && typeof chrome !== "undefined" && chrome.tabs) {
           chrome.tabs.create({ url });
         }
       });
     });
-
-    const GUIDE_CONTENT_ZH = `**dotStart** 2.1.0
-
-一个 现代 · 极简 · 干净 的新标签页
-
-
-**# 仓库**
-
-https://github.com/alt021/dotStart
-
-
-**# 制作者**
-
-AmeXE2
-ChatGPT
-Xiaomi MiMO
-
-
-**# 联系我们**
-
-alts.tech@hotmail.com
-
-
-**# 发行日志**
-
-// rel#2.1.0-20260812
-  **修复** 适配Firefox浏览器
-
-// rel#2.0.0-20260730
-  **新增** 条纹背景模式
-  **修复** 修改项目主视觉效果
-  **修复** 移除对npm的依赖
-  **修复** 使用引导适配深色模式`;
-
-    const GUIDE_CONTENT_EN = `**dotStart** 2.1.0
-
-A modern · minimal · clean new tab page
-
-
-**# Repository**
-
-https://github.com/alt021/dotStart
-
-
-**# Creator**
-
-AmeXE2
-ChatGPT
-Xiaomi MiMO
-
-
-**# Contact**
-
-alts.tech@hotmail.com
-
-
-**# Release Note**
-
-// rel#2.1.0-20260812
-  **Fixed** Firefox browser compatibility
-
-// rel#2.0.0-20260730
-  **Added** Stripe background mode
-  **Fixed** Modified main visual effect
-  **Fixed** Removed npm dependency
-  **Fixed** Onboarding adapted for dark mode`;
 
     let searchClickCount = 0;
     let searchClickTimer = null;
@@ -1173,8 +1238,7 @@ alts.tech@hotmail.com
 
     function showEasterEgg() {
       easterEggActive = true;
-      const lang = getLang();
-      const guideContent = lang === "zh" ? GUIDE_CONTENT_ZH : GUIDE_CONTENT_EN;
+      const guideContent = EASTER_CONTENT.trim().replaceAll("{{version}}", getRuntimeVersion());
       const overlay = document.createElement("div");
       overlay.className = "easter-egg-overlay";
       overlay.id = "easter-egg-overlay";
@@ -1198,6 +1262,12 @@ alts.tech@hotmail.com
       }).join("");
       overlay.appendChild(content);
       document.body.appendChild(overlay);
+      // Constant crawl speed: the element must travel its own height plus one
+      // viewport before it is fully off-screen, so derive the duration from that
+      // distance. A fixed duration scrolled long text too fast and left a blank
+      // screen while the leftover travel played out.
+      const travel = content.offsetHeight + window.innerHeight;
+      content.style.animationDuration = `${travel / EASTER_CRAWL_SPEED}s`;
       requestAnimationFrame(() => {
         overlay.classList.add("visible");
       });

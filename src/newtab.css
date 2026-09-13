@@ -919,15 +919,19 @@ body.bg-stripes {
   font-size: 1.1vw;
   line-height: 1.8;
   padding: 2rem;
+  /* Duration is replaced in JS with (content height + viewport) / 150px per second
+     so the crawl runs at a constant speed regardless of how long the text is. */
   animation: easter-egg-scroll 20s linear infinite;
 }
 
 @keyframes easter-egg-scroll {
-  0% {
+  from {
     transform: translateY(0);
   }
-  100% {
-    transform: translateY(-200%);
+  to {
+    /* Own height + one viewport: the exact distance to clear the screen, so the
+       loop restarts right when the last line leaves and never shows a blank gap. */
+    transform: translateY(calc(-100% - 100vh));
   }
 }
 

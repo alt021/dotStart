@@ -1,16 +1,19 @@
 {
   "manifest_version": 3,
-  "name": "dotStart",
+  "name": "__MSG_extName__",
   "version": "2.1.0",
   "description": "__MSG_extDescription__",
   "default_locale": "en",
   "chrome_url_overrides": {
     "newtab": "newtab.html"
   },
-  "permissions": ["search", "tabs", "bookmarks", "history"],
+  "permissions": ["search"],
+  "optional_permissions": ["bookmarks", "history"],
   "icons": {
+    "16": "icon-16.png",
     "48": "icon-48.png",
     "96": "icon-96.png",
+    "128": "icon-128.png",
     "256": "icon.png"
   },
   "browser_specific_settings": {

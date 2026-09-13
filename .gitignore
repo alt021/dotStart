@@ -1,1 +1,7 @@
-guide.md
+# IDE / editor scratch files
+node_modules/
+.DS_Store
+Thumbs.db
+
+# Local workspace data — not source
+.workbuddy/

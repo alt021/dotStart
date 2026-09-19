@@ -133,7 +133,8 @@ body.bg-stripes {
 .search-box {
   position: relative;
   width: 100%;
-  max-width: 500px;
+  /* Search box length; updateSearchStyle() writes the chosen value inline. */
+  max-width: var(--search-length, 500px);
   margin: 0 auto;
 }
 
@@ -201,58 +202,45 @@ body.bg-stripes {
   display: none;
 }
 
-/* Square */
-.style-square .search-input {
-  border: 1px solid var(--border);
-  border-radius: 4px;
+/* Search box styles. The two styles differ only in their frame: "modern" is a
+   full box, "geek" drops the sides and keeps a heavier baseline. Corner radius
+   (modern only), border weight and width are inline custom properties written
+   by updateSearchStyle(); the values here are the fallbacks a bare newtab.html
+   paints before JS runs. A weight of 1px and a radius of 8px are the defaults. */
+
+/* Modern */
+.style-modern .search-input {
+  border: var(--search-border, 1px) solid var(--border);
+  border-radius: var(--search-radius, 8px);
   padding-right: 5rem;
   background: var(--blur-bg);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
 }
 
-.style-square .search-input:focus {
+.style-modern .search-input:focus {
   border-color: var(--fg);
   background: var(--blur-bg-focus);
 }
 
-.style-square .search-input:has(~ .search-go.hidden) {
+.style-modern .search-input:has(~ .search-go.hidden) {
   padding-right: 1.25rem;
 }
 
-/* Rounded */
-.style-rounded .search-input {
-  border: 1px solid var(--border);
-  border-radius: 9999px;
-  padding-right: 5rem;
-  background: var(--blur-bg);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-}
-
-.style-rounded .search-input:focus {
-  border-color: var(--fg);
-  background: var(--blur-bg-focus);
-}
-
-.style-rounded .search-input:has(~ .search-go.hidden) {
-  padding-right: 1.25rem;
-}
-
-/* Line */
-.style-line .search-input {
+/* Geek */
+.style-geek .search-input {
   border: none;
-  border-bottom: 1px solid var(--border);
+  border-bottom: var(--search-border, 1px) solid var(--border);
   border-radius: 0;
   padding-right: 5rem;
   background: transparent;
 }
 
-.style-line .search-input:focus {
+.style-geek .search-input:focus {
   border-bottom-color: var(--fg);
 }
 
-.style-line .search-input:has(~ .search-go.hidden) {
+.style-geek .search-input:has(~ .search-go.hidden) {
   padding-right: 1.25rem;
 }
 
@@ -300,6 +288,9 @@ body.bg-stripes {
 .fa-language { --fa: "\f1ab"; }
 .fa-code { --fa: "\f121"; }
 .fa-xmark { --fa: "\f00d"; }
+.fa-border-top-left { --fa: "\f853"; }
+.fa-border-all { --fa: "\f84c"; }
+.fa-text-width { --fa: "\f035"; }
 
 /* Selection marker used by the settings dialog — square to match the
    right-angled frame of the menu and the tiles. */
@@ -565,6 +556,72 @@ body.bg-stripes {
 
 .settings-dialog-option:hover {
   background: var(--dot);
+}
+
+/* Number variant of the dialog: one text field, a range hint in the
+   placeholder, an inline error line and a confirm button. Widened so the hint
+   fits on one line. Monochrome throughout -- the error is signalled by text and
+   the input frame, not by a colour the theme does not own. */
+.settings-dialog-number {
+  min-width: 300px;
+}
+
+.settings-dialog-field {
+  padding: 0.9rem 1.25rem 0;
+}
+
+.settings-dialog-input {
+  width: 100%;
+  padding: 0.5rem 0.7rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.settings-dialog-input::placeholder {
+  color: var(--placeholder);
+  font-size: 0.78rem;
+}
+
+.settings-dialog-input:focus,
+.settings-dialog-input.invalid {
+  border-color: var(--fg);
+}
+
+/* Always present, min-height reserved: showing an error never shifts the
+   confirm button. */
+.settings-dialog-error {
+  min-height: 1.1rem;
+  padding: 0.4rem 0 0;
+  color: var(--fg);
+  font-size: 0.75rem;
+}
+
+.settings-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.25rem 1.25rem 1rem;
+}
+
+.settings-dialog-confirm {
+  padding: 0.5rem 1.3rem;
+  background: var(--fg);
+  border: 1px solid var(--fg);
+  border-radius: 0;
+  color: var(--bg);
+  font-family: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.settings-dialog-confirm:hover {
+  opacity: 0.75;
 }
 
 /* Click Effects */

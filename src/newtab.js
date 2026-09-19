@@ -8,6 +8,9 @@ const STORAGE_KEYS = {
   lang: "lang",
   clockFormat: "clockFormat",
   searchStyle: "searchStyle",
+  searchRadius: "searchRadius",
+  searchBorder: "searchBorder",
+  searchLength: "searchLength",
   showClickFx: "showClickFx"
 };
 const SEARCH_URLS = {
@@ -18,6 +21,22 @@ const SEARCH_URLS = {
   baidu: "https://www.baidu.com/s?wd="
 };
 const SEARCH_ENGINES = ["browser", "google", "duckduckgo", "qwant", "bing", "baidu"];
+// Search box styles. "modern" replaced the old square + rounded pair, "geek"
+// replaced the old underline ("line") style.
+const SEARCH_STYLES = ["modern", "geek"];
+// Old value -> new value. getStored() would fall back to "modern" for any
+// unknown value, which would silently promote underline users, so map instead.
+const LEGACY_SEARCH_STYLES = { square: "modern", rounded: "modern", line: "geek" };
+// Allowed ranges, in px, for the numeric search box settings. `default` is what
+// is used when nothing is stored. `zeroMeansDefault` marks the settings where a
+// stored 0 is the documented "keep the default" value (radius, length); border
+// weight leaves it false, so 0 is refused -- a frameless box is what "geek"
+// already is. Keep `default` in step with the fallbacks in newtab.css.
+const SEARCH_LIMITS = {
+  radius: { min: 0, max: 60, default: 8, zeroMeansDefault: true },
+  border: { min: 1, max: 10, default: 1, zeroMeansDefault: false },
+  length: { min: 200, max: 1200, default: 500, zeroMeansDefault: true }
+};
 const I18N = {
   en: {
     searchTitle: "Search title",
@@ -48,9 +67,15 @@ const I18N = {
     placeholder: "Type to search...",
     go: "Go",
     searchStyle: "Search Box Style",
-    square: "Square",
-    rounded: "Rounded",
-    line: "Line",
+    modern: "Modern",
+    geek: "Geek",
+    searchRadius: "Corner Radius",
+    searchBorder: "Border Weight",
+    searchLength: "Box Length",
+    rangeWithDefault: "Range {min}-{max}px, 0 keeps the default",
+    rangeNoZero: "Range {min}-{max}px, 0 is not allowed",
+    invalidNumber: "Enter a whole number from {min} to {max}",
+    confirm: "OK",
     appearance: "Appearance",
     searchBoxTab: "Search Box",
     shortcutsTab: "Shortcuts",
@@ -90,9 +115,15 @@ const I18N = {
     placeholder: "输入搜索内容...",
     go: "前往",
     searchStyle: "搜索框样式",
-    square: "方形",
-    rounded: "圆角矩形",
-    line: "横线",
+    modern: "现代",
+    geek: "极客",
+    searchRadius: "圆角大小",
+    searchBorder: "框线粗细",
+    searchLength: "搜索框长度",
+    rangeWithDefault: "范围 {min}–{max}px，0 取默认值",
+    rangeNoZero: "范围 {min}–{max}px，不可为 0",
+    invalidNumber: "请输入 {min}–{max} 之间的整数",
+    confirm: "确定",
     appearance: "外观",
     searchBoxTab: "搜索框",
     shortcutsTab: "快捷方式",
@@ -107,6 +138,10 @@ const I18N = {
 function t(key) {
   return I18N[getLang()][key] || key;
 }
+// Fills {name} slots in an I18N string (range hints, validation messages).
+function fmt(str, vars) {
+  return str.replace(/\{(\w+)\}/g, (whole, key) => (key in vars ? vars[key] : whole));
+}
 function getStored(key, valid, fallback) {
   const v = localStorage.getItem(key);
   return valid.includes(v) ? v : fallback;
@@ -114,7 +149,9 @@ function getStored(key, valid, fallback) {
 function setStored(key, value) {
   localStorage.setItem(key, value);
 }
-// One-time migration: older versions stored "showDots" instead of "backgroundStyle".
+// Migrations. Both are idempotent and cheap enough to run on every load: older
+// versions stored "showDots" instead of "backgroundStyle", and the search box
+// styles were renamed (see LEGACY_SEARCH_STYLES).
 function migrateLegacySettings() {
   try {
     if (localStorage.getItem(STORAGE_KEYS.backgroundStyle) === null &&
@@ -122,6 +159,10 @@ function migrateLegacySettings() {
       localStorage.setItem(STORAGE_KEYS.backgroundStyle, "dots");
     }
     localStorage.removeItem("showDots");
+    const style = localStorage.getItem(STORAGE_KEYS.searchStyle);
+    if (style !== null && Object.prototype.hasOwnProperty.call(LEGACY_SEARCH_STYLES, style)) {
+      localStorage.setItem(STORAGE_KEYS.searchStyle, LEGACY_SEARCH_STYLES[style]);
+    }
   } catch (_) { /* localStorage may be unavailable */ }
 }
 function detectBrowserLang() {
@@ -222,12 +263,41 @@ function updateGo() {
   const showGo = getStored(STORAGE_KEYS.showGo, ["true", "false"], "true") === "true";
   if (goBtn) goBtn.classList.toggle("hidden", !showGo);
 }
+// A value is acceptable when it is a whole number inside the range -- or the
+// documented "keep the default" zero, which only some settings accept (radius
+// and length; never the border weight). Single source of truth for both the
+// dialog's validation and readLimit() below, so a rejected input and a stored
+// value can never disagree about what 0 means.
+function isValidLimit(n, spec) {
+  if (!Number.isInteger(n)) return false;
+  if (n === 0) return !!spec.zeroMeansDefault;
+  return n >= spec.min && n <= spec.max;
+}
+// Resolves a stored numeric setting to the value actually in use: anything
+// missing, non-integer, out of range -- or 0 where 0 means "keep the default"
+// -- becomes the default from SEARCH_LIMITS. So a stored 0 and a stored default
+// render identically, which is what the panel reports too.
+function readLimit(key, spec) {
+  const raw = localStorage.getItem(key);
+  const n = raw === null || raw.trim() === "" ? NaN : Number(raw.trim());
+  if (n === 0 && spec.zeroMeansDefault) return spec.default;
+  return isValidLimit(n, spec) ? n : spec.default;
+}
+function styleSize(key, spec) {
+  return `${readLimit(key, spec)}px`;
+}
 function updateSearchStyle() {
   const form = document.getElementById("search-form");
-  const style = getStored(STORAGE_KEYS.searchStyle, ["square", "rounded", "line"], "square");
   if (!form) return;
-  form.classList.remove("style-square", "style-rounded", "style-line");
+  const style = getStored(STORAGE_KEYS.searchStyle, SEARCH_STYLES, "modern");
+  form.classList.remove("style-modern", "style-geek");
   form.classList.add(`style-${style}`);
+  // Sizes travel to CSS as custom properties on the form (see newtab.css). The
+  // radius is written for both styles -- it is inert on the underline style,
+  // and writing it unconditionally keeps a style switch from losing the value.
+  form.style.setProperty("--search-radius", styleSize(STORAGE_KEYS.searchRadius, SEARCH_LIMITS.radius));
+  form.style.setProperty("--search-border", styleSize(STORAGE_KEYS.searchBorder, SEARCH_LIMITS.border));
+  form.style.setProperty("--search-length", styleSize(STORAGE_KEYS.searchLength, SEARCH_LIMITS.length));
 }
 function escapeHTML(str) {
   const div = document.createElement("div");
@@ -542,13 +612,28 @@ function getSettingsItems(tab) {
     ];
   }
   if (tab === "searchBoxTab") {
-    return [
+    const style = getStored(STORAGE_KEYS.searchStyle, SEARCH_STYLES, "modern");
+    const items = [
       { action: "set-engine", icon: "fa-magnifying-glass", labelKey: "searchEngine", kind: "select", key: STORAGE_KEYS.searchEngine, fallback: "browser",
         options: engineOptions() },
-      { action: "set-style", icon: "fa-shapes", labelKey: "searchStyle", kind: "select", key: STORAGE_KEYS.searchStyle, fallback: "square",
-        options: [["square", "square"], ["rounded", "rounded"], ["line", "line"]] },
-      { action: "toggle-go", icon: "fa-arrow-right", labelKey: "showGo", kind: "toggle", key: STORAGE_KEYS.showGo, fallback: "true" }
+      { action: "set-style", icon: "fa-shapes", labelKey: "searchStyle", kind: "select", key: STORAGE_KEYS.searchStyle, fallback: "modern",
+        options: SEARCH_STYLES.map((s) => [s, s]) }
     ];
+    // The size settings are sandwiched between the style selector and the
+    // Search button, and depend on the style: a corner radius means nothing on
+    // the underline style, so it is only offered for "modern".
+    if (style === "modern") {
+      items.push({ action: "set-radius", icon: "fa-border-top-left", labelKey: "searchRadius", kind: "number",
+        key: STORAGE_KEYS.searchRadius, spec: SEARCH_LIMITS.radius });
+    }
+    items.push(
+      { action: "set-border", icon: "fa-border-all", labelKey: "searchBorder", kind: "number",
+        key: STORAGE_KEYS.searchBorder, spec: SEARCH_LIMITS.border },
+      { action: "set-length", icon: "fa-text-width", labelKey: "searchLength", kind: "number",
+        key: STORAGE_KEYS.searchLength, spec: SEARCH_LIMITS.length },
+      { action: "toggle-go", icon: "fa-arrow-right", labelKey: "showGo", kind: "toggle", key: STORAGE_KEYS.showGo, fallback: "true" }
+    );
+    return items;
   }
   if (tab === "shortcutsTab") {
     // Reserved for a future shortcuts implementation.
@@ -560,14 +645,18 @@ function getSettingsItems(tab) {
     { action: "custom-css", icon: "fa-code", labelKey: "customCSS", kind: "disabled", statusKey: "comingSoon" }
   ];
 }
+function itemValue(item) {
+  // Numeric settings resolve through readLimit(), so the panel reports the
+  // value in force (the default, when 0 or nonsense is stored).
+  if (item.kind === "number") return String(readLimit(item.key, item.spec));
+  return getStored(item.key, itemValues(item), item.fallback);
+}
 function itemValues(item) {
   return item.kind === "toggle" ? ["true", "false"] : item.options.map((o) => o[0]);
 }
-function itemValue(item) {
-  return getStored(item.key, itemValues(item), item.fallback);
-}
 function itemStatus(item) {
   if (item.kind === "toggle") return t(itemValue(item) === "true" ? "on" : "off");
+  if (item.kind === "number") return `${itemValue(item)} px`;
   const option = item.options.find((o) => o[0] === itemValue(item));
   return option ? t(option[1]) : "";
 }
@@ -611,18 +700,75 @@ function closeSettingsPanel() {
 function settingsPanelVisible() {
   return !!settingsPanelEl && settingsPanelEl.classList.contains("visible");
 }
+// Placeholder for the number dialog: it must state the range the field accepts,
+// and whether 0 is allowed (it means "keep the default" where it is).
+function numberHint(spec) {
+  return fmt(t(spec.zeroMeansDefault ? "rangeWithDefault" : "rangeNoZero"), { min: spec.min, max: spec.max });
+}
 function openSettingsDialog(item) {
   if (!settingsDialogEl) return;
   settingsDialogItem = item;
   const current = itemValue(item);
   settingsDialogEl.querySelector(".settings-dialog-title").textContent = t(item.labelKey);
-  settingsDialogEl.querySelector(".settings-dialog-options").innerHTML = item.options.map(([value, labelKey]) => `
+  const body = settingsDialogEl.querySelector(".settings-dialog-options");
+  const dialog = settingsDialogEl.querySelector(".settings-dialog");
+  const isNumber = item.kind === "number";
+  dialog.classList.toggle("settings-dialog-number", isNumber);
+  if (isNumber) {
+    // Prefilled with the value in force; the hint lives in the placeholder, and
+    // the error line is always present so showing one never shifts the button.
+    body.innerHTML = `
+      <div class="settings-dialog-field">
+        <input class="settings-dialog-input" type="text" inputmode="numeric" autocomplete="off"
+               spellcheck="false" aria-label="${t(item.labelKey)}"
+               placeholder="${numberHint(item.spec)}" value="${current}">
+      </div>
+      <div class="settings-dialog-error" aria-live="polite"></div>
+      <div class="settings-dialog-actions">
+        <button class="settings-dialog-confirm" type="button">${t("confirm")}</button>
+      </div>
+    `;
+    const input = body.querySelector(".settings-dialog-input");
+    const errorEl = body.querySelector(".settings-dialog-error");
+    input.addEventListener("input", () => {
+      input.classList.remove("invalid");
+      errorEl.textContent = "";
+    });
+    settingsDialogEl.classList.add("visible");
+    input.focus();
+    input.select();
+    return;
+  }
+  body.innerHTML = item.options.map(([value, labelKey]) => `
     <button class="settings-dialog-option" data-value="${value}">
       <span class="menu-radio ${value === current ? "selected" : ""}"></span>
       ${t(labelKey)}
     </button>
   `).join("");
   settingsDialogEl.classList.add("visible");
+}
+// Reads the number dialog's field and either applies it or reports why not. A
+// valid 0 is stored as-is: readLimit() turns it back into the default, which is
+// what the tile then shows.
+function confirmNumberSetting() {
+  const item = settingsDialogItem;
+  if (!item || item.kind !== "number" || !settingsDialogEl) return;
+  const input = settingsDialogEl.querySelector(".settings-dialog-input");
+  const errorEl = settingsDialogEl.querySelector(".settings-dialog-error");
+  if (!input || !errorEl) return;
+  const spec = item.spec;
+  const raw = input.value.trim();
+  const n = raw === "" ? NaN : Number(raw);
+  if (!isValidLimit(n, spec)) {
+    errorEl.textContent = fmt(t("invalidNumber"), { min: spec.min, max: spec.max });
+    input.classList.add("invalid");
+    input.focus();
+    input.select();
+    return;
+  }
+  applySetting(item.action, String(n));
+  closeSettingsDialog();
+  renderSettingsPanel();
 }
 function closeSettingsDialog() {
   if (settingsDialogEl) settingsDialogEl.classList.remove("visible");
@@ -667,6 +813,18 @@ function applySetting(action, value) {
       break;
     case "set-style":
       setStored(STORAGE_KEYS.searchStyle, value);
+      updateSearchStyle();
+      break;
+    case "set-radius":
+      setStored(STORAGE_KEYS.searchRadius, value);
+      updateSearchStyle();
+      break;
+    case "set-border":
+      setStored(STORAGE_KEYS.searchBorder, value);
+      updateSearchStyle();
+      break;
+    case "set-length":
+      setStored(STORAGE_KEYS.searchLength, value);
       updateSearchStyle();
       break;
     case "set-lang":
@@ -765,7 +923,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (item.kind === "toggle") {
         toggleCurrent(item.action);
         renderSettingsPanel();
-      } else if (item.kind === "select") {
+      } else if (item.kind === "select" || item.kind === "number") {
+        // Both open a dialog: a list of values for selects, a field for numbers.
         openSettingsDialog(item);
       }
     });
@@ -782,6 +941,10 @@ document.addEventListener("DOMContentLoaded", async () => {
         closeSettingsDialog();
         return;
       }
+      if (e.target.closest(".settings-dialog-confirm")) {
+        confirmNumberSetting();
+        return;
+      }
       const option = e.target.closest(".settings-dialog-option");
       if (option && settingsDialogItem) {
         applySetting(settingsDialogItem.action, option.dataset.value);
@@ -791,6 +954,13 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
       // Clicking the backdrop (but not the dialog itself) dismisses it.
       if (!e.target.closest(".settings-dialog")) closeSettingsDialog();
+    });
+    // Enter confirms the number dialog. Escape (handled on document) closes it.
+    settingsDialogEl.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      if (!settingsDialogItem || settingsDialogItem.kind !== "number") return;
+      e.preventDefault();
+      confirmNumberSetting();
     });
     // The panel collapses on an outside click -- and on nothing else.
     //

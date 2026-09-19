@@ -253,30 +253,52 @@ body.bg-stripes {
   padding-right: 1.25rem;
 }
 
-/* Check / radio indicators shared by the settings panel */
-.menu-label {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
+/* Font Awesome Free (Solid) — subset
+   ---------------------------------------------------------------------------
+   src/fa-solid-900-subset.woff2 is subset from fa-solid-900.woff2 of Font
+   Awesome 7.3.1 to ONLY the glyphs listed below (2.1 KB instead of 119 KB).
+   To use another icon: add its name to .workbuddy/fa_subset.py, re-run it, then
+   copy the printed codepoint into a new `.fa-<name>` rule underneath. The font
+   and its licence live side by side in src/.
+
+   Icons: Font Awesome Free 7.3.1 by @fontawesome — https://fontawesome.com
+   Licence: https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1) */
+@font-face {
+  font-family: 'Font Awesome 7 Free';
+  font-style: normal;
+  font-weight: 900;
+  font-display: block;
+  src: url('./fa-solid-900-subset.woff2') format('woff2');
 }
 
-.menu-check {
-  width: 14px;
-  height: 14px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10px;
+.fa-solid {
+  font-family: 'Font Awesome 7 Free';
+  font-weight: 900;
+  font-style: normal;
+  display: inline-block;
+  line-height: 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-.menu-check.checked {
-  background: var(--fg);
-  color: var(--bg);
-  border-color: var(--fg);
+.fa-solid::before {
+  content: var(--fa);
 }
 
+.fa-heading { --fa: "\f1dc"; }
+.fa-clock { --fa: "\f017"; }
+.fa-stopwatch { --fa: "\f2f2"; }
+.fa-fill-drip { --fa: "\f576"; }
+.fa-circle-half-stroke { --fa: "\f042"; }
+.fa-hand-pointer { --fa: "\f25a"; }
+.fa-magnifying-glass { --fa: "\f002"; }
+.fa-shapes { --fa: "\f61f"; }
+.fa-arrow-right { --fa: "\f061"; }
+.fa-language { --fa: "\f1ab"; }
+.fa-code { --fa: "\f121"; }
+.fa-xmark { --fa: "\f00d"; }
+
+/* Radio indicator used by the settings dialog */
 .menu-radio {
   width: 12px;
   height: 12px;
@@ -285,6 +307,7 @@ body.bg-stripes {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
 }
 
 .menu-radio.selected {
@@ -302,11 +325,16 @@ body.bg-stripes {
 /* Bottom-sheet settings panel (opened by right-click) */
 .settings-panel {
   position: fixed;
-  left: 0;
-  right: 0;
+  left: 10%;
+  right: 10%;
   bottom: 0;
+  height: 340px;
+  display: flex;
+  flex-direction: column;
   background: var(--bg);
-  border-top: 1px solid var(--border);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
   box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.12);
   z-index: 1000;
   transform: translateY(100%);
@@ -319,7 +347,8 @@ body.bg-stripes {
 
 .settings-tabs {
   display: flex;
-  padding: 0.75rem 2rem 0;
+  flex-shrink: 0;
+  padding: 0.75rem 1.5rem 0;
   border-bottom: 1px solid var(--border);
 }
 
@@ -344,14 +373,19 @@ body.bg-stripes {
   border-bottom-color: var(--fg);
 }
 
+/* Card strip — the only overflow axis is horizontal */
 .settings-content {
-  max-height: 45vh;
-  overflow-y: auto;
-  padding: 0.75rem 2rem 1.5rem;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 0.75rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 1rem 1.5rem 1.25rem;
 }
 
 .settings-content::-webkit-scrollbar {
-  width: 8px;
+  height: 8px;
 }
 
 .settings-content::-webkit-scrollbar-track {
@@ -359,29 +393,143 @@ body.bg-stripes {
 }
 
 .settings-content::-webkit-scrollbar-thumb {
-  background: var(--muted);
+  background: var(--border);
   border-radius: 4px;
 }
 
-.settings-group-title {
-  font-size: 0.75rem;
+.settings-content::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+.settings-card {
+  flex: 0 0 128px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  cursor: pointer;
+  text-align: left;
+  overflow: hidden;
+  transition: border-color 0.15s;
+}
+
+.settings-card:hover:not(:disabled) {
+  border-color: var(--fg);
+}
+
+.settings-card:disabled {
+  cursor: default;
+}
+
+.settings-card-icon {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+  color: var(--fg);
+  background: var(--blur-bg);
+}
+
+.settings-card-disabled .settings-card-icon,
+.settings-card-disabled .settings-card-name {
   color: var(--muted);
-  margin: 1rem 0 0.25rem;
 }
 
-.settings-group-title:first-child {
-  margin-top: 0.25rem;
+.settings-card-name {
+  padding: 0.5rem 0.7rem 0.15rem;
+  font-size: 0.85rem;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.settings-row {
+.settings-card-status {
+  padding: 0 0.7rem 0.55rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Dialog for multi-value settings */
+.settings-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  z-index: 1001;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+
+.settings-dialog-overlay.visible {
+  display: flex;
+}
+
+.settings-dialog {
+  min-width: 240px;
+  max-width: 70vw;
+  max-height: 70vh;
+  overflow-y: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+}
+
+.settings-dialog-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  width: 100%;
-  padding: 0.55rem 0.5rem;
+  padding: 0.85rem 1rem 0.55rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-dialog-title {
+  font-size: 0.9rem;
+  color: var(--fg);
+}
+
+.settings-dialog-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
   background: none;
   border: none;
   border-radius: 4px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.settings-dialog-close:hover {
+  color: var(--fg);
+}
+
+.settings-dialog-options {
+  padding: 0.35rem 0 0.5rem;
+}
+
+.settings-dialog-option {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.55rem 1.25rem;
+  background: none;
+  border: none;
   color: var(--fg);
   font-size: 0.85rem;
   cursor: pointer;
@@ -389,22 +537,8 @@ body.bg-stripes {
   transition: background 0.1s;
 }
 
-.settings-row:hover:not(:disabled) {
+.settings-dialog-option:hover {
   background: var(--dot);
-}
-
-.settings-row:disabled {
-  cursor: default;
-  color: var(--muted);
-}
-
-.settings-row-sub {
-  padding-left: 1.5rem;
-}
-
-.settings-soon {
-  font-size: 0.75rem;
-  color: var(--muted);
 }
 
 /* Click Effects */

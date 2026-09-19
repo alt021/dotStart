@@ -56,7 +56,10 @@ const I18N = {
     shortcutsTab: "Shortcuts",
     advanced: "Advanced",
     customCSS: "Custom CSS",
-    comingSoon: "Coming soon"
+    comingSoon: "Coming soon",
+    on: "On",
+    off: "Off",
+    close: "Close"
   },
   zh: {
     searchTitle: "显示标题",
@@ -95,7 +98,10 @@ const I18N = {
     shortcutsTab: "快捷方式",
     advanced: "高级",
     customCSS: "自定义 CSS",
-    comingSoon: "即将推出"
+    comingSoon: "即将推出",
+    on: "已启用",
+    off: "已停用",
+    close: "关闭"
   }
 };
 function t(key) {
@@ -501,94 +507,91 @@ function search(query) {
 }
 // Bottom-sheet settings panel, opened by right-click. Four tabs:
 // Appearance / Search Box / Shortcuts (reserved, intentionally empty) / Advanced.
+//
+// Each setting renders as a card in a horizontally scrolling strip: an icon on
+// top (Font Awesome Free Solid -- the shipped font is subset, see newtab.css),
+// the name below it at normal size, and the current value under that in a
+// smaller muted style. Toggles flip on click; multi-value settings open a
+// dialog to pick from.
 const SETTINGS_TABS = ["appearance", "searchBoxTab", "shortcutsTab", "advanced"];
 let settingsTab = "appearance";
 let settingsPanelEl = null;
+let settingsDialogEl = null;
+let settingsDialogItem = null;
 
-function toggleRow(action, checked, labelKey) {
+function engineOptions() {
+  const options = [];
+  // chrome.search.query() does not exist on Firefox, so "browser default" would
+  // silently fail there -- it is not offered at all.
+  if (!isFirefox()) options.push(["browser", "browserDefault"]);
+  options.push(["google", "google"], ["duckduckgo", "duckduckgo"], ["qwant", "qwant"],
+    ["bing", "bing"], ["baidu", "baidu"]);
+  return options;
+}
+function getSettingsItems(tab) {
+  if (tab === "appearance") {
+    return [
+      { action: "toggle-title", icon: "fa-heading", labelKey: "searchTitle", kind: "toggle", key: STORAGE_KEYS.showTitle, fallback: "true" },
+      { action: "toggle-time", icon: "fa-clock", labelKey: "timeDisplay", kind: "toggle", key: STORAGE_KEYS.showTime, fallback: "false" },
+      { action: "set-clock", icon: "fa-stopwatch", labelKey: "clockFormat", kind: "select", key: STORAGE_KEYS.clockFormat, fallback: "24",
+        options: [["12", "clock12h"], ["24", "clock24h"]] },
+      { action: "set-background", icon: "fa-fill-drip", labelKey: "background", kind: "select", key: STORAGE_KEYS.backgroundStyle, fallback: "blank",
+        options: [["blank", "blankBackground"], ["dots", "dotBackground"], ["stripes", "stripeBackground"]] },
+      { action: "set-theme", icon: "fa-circle-half-stroke", labelKey: "theme", kind: "select", key: STORAGE_KEYS.theme, fallback: "auto",
+        options: [["auto", "auto"], ["light", "light"], ["dark", "dark"]] },
+      { action: "toggle-clickfx", icon: "fa-hand-pointer", labelKey: "clickEffects", kind: "toggle", key: STORAGE_KEYS.showClickFx, fallback: "true" }
+    ];
+  }
+  if (tab === "searchBoxTab") {
+    return [
+      { action: "set-engine", icon: "fa-magnifying-glass", labelKey: "searchEngine", kind: "select", key: STORAGE_KEYS.searchEngine, fallback: "browser",
+        options: engineOptions() },
+      { action: "set-style", icon: "fa-shapes", labelKey: "searchStyle", kind: "select", key: STORAGE_KEYS.searchStyle, fallback: "square",
+        options: [["square", "square"], ["rounded", "rounded"], ["line", "line"]] },
+      { action: "toggle-go", icon: "fa-arrow-right", labelKey: "showGo", kind: "toggle", key: STORAGE_KEYS.showGo, fallback: "true" }
+    ];
+  }
+  if (tab === "shortcutsTab") {
+    // Reserved for a future shortcuts implementation.
+    return [];
+  }
+  return [
+    { action: "set-lang", icon: "fa-language", labelKey: "language", kind: "select", key: STORAGE_KEYS.lang, fallback: "en",
+      options: [["en", "english"], ["zh", "chinese"]] },
+    { action: "custom-css", icon: "fa-code", labelKey: "customCSS", kind: "disabled", statusKey: "comingSoon" }
+  ];
+}
+function itemValues(item) {
+  return item.kind === "toggle" ? ["true", "false"] : item.options.map((o) => o[0]);
+}
+function itemValue(item) {
+  return getStored(item.key, itemValues(item), item.fallback);
+}
+function itemStatus(item) {
+  if (item.kind === "toggle") return t(itemValue(item) === "true" ? "on" : "off");
+  const option = item.options.find((o) => o[0] === itemValue(item));
+  return option ? t(option[1]) : "";
+}
+function cardHTML(item) {
+  const disabled = item.kind === "disabled";
   return `
-    <button class="settings-row" data-action="${action}">
-      <span class="menu-label">
-        <span class="menu-check ${checked ? "checked" : ""}">${checked ? "&#10003;" : ""}</span>
-        ${t(labelKey)}
-      </span>
+    <button class="settings-card${disabled ? " settings-card-disabled" : ""}"
+            data-action="${item.action}"${disabled ? " disabled" : ""}>
+      <span class="settings-card-icon"><i class="fa-solid ${item.icon}" aria-hidden="true"></i></span>
+      <span class="settings-card-name">${t(item.labelKey)}</span>
+      <span class="settings-card-status">${disabled ? t(item.statusKey) : itemStatus(item)}</span>
     </button>
   `;
 }
-function radioRow(action, value, selected, labelKey) {
-  return `
-    <button class="settings-row settings-row-sub" data-action="${action}" data-value="${value}">
-      <span class="menu-label">
-        <span class="menu-radio ${selected ? "selected" : ""}"></span>
-        ${t(labelKey)}
-      </span>
-    </button>
-  `;
-}
-function groupTitle(labelKey) {
-  return `<div class="settings-group-title">${t(labelKey)}</div>`;
+function findSettingsItem(action) {
+  for (const tab of SETTINGS_TABS) {
+    const found = getSettingsItems(tab).find((item) => item.action === action);
+    if (found) return found;
+  }
+  return null;
 }
 function getSettingsContentHTML() {
-  const showTitle = getStored(STORAGE_KEYS.showTitle, ["true", "false"], "true") === "true";
-  const showTime = getStored(STORAGE_KEYS.showTime, ["true", "false"], "false") === "true";
-  const showGo = getStored(STORAGE_KEYS.showGo, ["true", "false"], "true") === "true";
-  const showClickFx = getStored(STORAGE_KEYS.showClickFx, ["true", "false"], "true") === "true";
-  const backgroundStyle = getStored(STORAGE_KEYS.backgroundStyle, ["blank", "dots", "stripes"], "blank");
-  const theme = getStored(STORAGE_KEYS.theme, ["auto", "light", "dark"], "auto");
-  const engine = getStored(STORAGE_KEYS.searchEngine, SEARCH_ENGINES, "browser");
-  const lang = getLang();
-  const clock = getStored(STORAGE_KEYS.clockFormat, ["12", "24"], "24");
-  const searchStyle = getStored(STORAGE_KEYS.searchStyle, ["square", "rounded", "line"], "square");
-
-  if (settingsTab === "appearance") {
-    return `
-      ${toggleRow("toggle-title", showTitle, "searchTitle")}
-      ${toggleRow("toggle-time", showTime, "timeDisplay")}
-      ${groupTitle("clockFormat")}
-      ${radioRow("set-clock", "12", clock === "12", "clock12h")}
-      ${radioRow("set-clock", "24", clock === "24", "clock24h")}
-      ${groupTitle("background")}
-      ${radioRow("set-background", "blank", backgroundStyle === "blank", "blankBackground")}
-      ${radioRow("set-background", "dots", backgroundStyle === "dots", "dotBackground")}
-      ${radioRow("set-background", "stripes", backgroundStyle === "stripes", "stripeBackground")}
-      ${groupTitle("theme")}
-      ${radioRow("set-theme", "auto", theme === "auto", "auto")}
-      ${radioRow("set-theme", "light", theme === "light", "light")}
-      ${radioRow("set-theme", "dark", theme === "dark", "dark")}
-      ${toggleRow("toggle-clickfx", showClickFx, "clickEffects")}
-    `;
-  }
-  if (settingsTab === "searchBoxTab") {
-    return `
-      ${groupTitle("searchEngine")}
-      ${isFirefox() ? "" : radioRow("set-engine", "browser", engine === "browser", "browserDefault")}
-      ${radioRow("set-engine", "google", engine === "google", "google")}
-      ${radioRow("set-engine", "duckduckgo", engine === "duckduckgo", "duckduckgo")}
-      ${radioRow("set-engine", "qwant", engine === "qwant", "qwant")}
-      ${radioRow("set-engine", "bing", engine === "bing", "bing")}
-      ${radioRow("set-engine", "baidu", engine === "baidu", "baidu")}
-      ${groupTitle("searchStyle")}
-      ${radioRow("set-style", "square", searchStyle === "square", "square")}
-      ${radioRow("set-style", "rounded", searchStyle === "rounded", "rounded")}
-      ${radioRow("set-style", "line", searchStyle === "line", "line")}
-      ${toggleRow("toggle-go", showGo, "showGo")}
-    `;
-  }
-  if (settingsTab === "shortcutsTab") {
-    // Reserved for a future shortcuts implementation.
-    return "";
-  }
-  // advanced
-  return `
-    ${groupTitle("language")}
-    ${radioRow("set-lang", "en", lang === "en", "english")}
-    ${radioRow("set-lang", "zh", lang === "zh", "chinese")}
-    ${groupTitle("customCSS")}
-    <button class="settings-row" data-action="custom-css" disabled>
-      <span class="menu-label">${t("customCSS")}</span>
-      <span class="settings-soon">${t("comingSoon")}</span>
-    </button>
-  `;
+  return getSettingsItems(settingsTab).map(cardHTML).join("");
 }
 function renderSettingsPanel() {
   if (!settingsPanelEl) return;
@@ -608,6 +611,80 @@ function closeSettingsPanel() {
 }
 function settingsPanelVisible() {
   return !!settingsPanelEl && settingsPanelEl.classList.contains("visible");
+}
+function openSettingsDialog(item) {
+  if (!settingsDialogEl) return;
+  settingsDialogItem = item;
+  const current = itemValue(item);
+  settingsDialogEl.querySelector(".settings-dialog-title").textContent = t(item.labelKey);
+  settingsDialogEl.querySelector(".settings-dialog-options").innerHTML = item.options.map(([value, labelKey]) => `
+    <button class="settings-dialog-option" data-value="${value}">
+      <span class="menu-radio ${value === current ? "selected" : ""}"></span>
+      ${t(labelKey)}
+    </button>
+  `).join("");
+  settingsDialogEl.classList.add("visible");
+}
+function closeSettingsDialog() {
+  if (settingsDialogEl) settingsDialogEl.classList.remove("visible");
+  settingsDialogItem = null;
+}
+function settingsDialogVisible() {
+  return !!settingsDialogEl && settingsDialogEl.classList.contains("visible");
+}
+// Applies one setting and refreshes whatever the page shows, so a card flip is
+// visible immediately without re-rendering the whole panel.
+function applySetting(action, value) {
+  switch (action) {
+    case "toggle-title":
+      setStored(STORAGE_KEYS.showTitle, value);
+      updatePrompt();
+      break;
+    case "toggle-time":
+      setStored(STORAGE_KEYS.showTime, value);
+      updateTime();
+      break;
+    case "toggle-go":
+      setStored(STORAGE_KEYS.showGo, value);
+      updateGo();
+      break;
+    case "toggle-clickfx":
+      setStored(STORAGE_KEYS.showClickFx, value);
+      updateClickFx();
+      break;
+    case "set-background":
+      setStored(STORAGE_KEYS.backgroundStyle, value);
+      updateDots();
+      break;
+    case "set-clock":
+      setStored(STORAGE_KEYS.clockFormat, value);
+      updateTime();
+      break;
+    case "set-theme":
+      applyTheme(value);
+      break;
+    case "set-engine":
+      setStored(STORAGE_KEYS.searchEngine, value);
+      break;
+    case "set-style":
+      setStored(STORAGE_KEYS.searchStyle, value);
+      updateSearchStyle();
+      break;
+    case "set-lang":
+      setStored(STORAGE_KEYS.lang, value);
+      applyDocumentLang();
+      updateUI();
+      // Tab labels and every card are translated text, so retranslate in place.
+      settingsPanelEl.querySelectorAll(".settings-tab").forEach((btn) => {
+        btn.textContent = t(btn.dataset.tab);
+      });
+      break;
+  }
+}
+function toggleCurrent(action) {
+  const item = findSettingsItem(action);
+  if (!item) return;
+  applySetting(action, itemValue(item) === "true" ? "false" : "true");
 }
 document.addEventListener("DOMContentLoaded", async () => {
   migrateLegacySettings();
@@ -647,10 +724,33 @@ document.addEventListener("DOMContentLoaded", async () => {
       <div class="settings-content"></div>
     `;
     document.body.appendChild(settingsPanelEl);
+    settingsDialogEl = document.createElement("div");
+    settingsDialogEl.className = "settings-dialog-overlay";
+    settingsDialogEl.id = "settings-dialog";
+    settingsDialogEl.innerHTML = `
+      <div class="settings-dialog" role="dialog" aria-modal="true">
+        <div class="settings-dialog-header">
+          <div class="settings-dialog-title"></div>
+          <button class="settings-dialog-close" type="button" aria-label="${t("close")}" title="${t("close")}">
+            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div class="settings-dialog-options"></div>
+      </div>
+    `;
+    document.body.appendChild(settingsDialogEl);
     renderSettingsPanel();
+    // Right-click toggles the panel: it opens when closed and collapses when
+    // already open. A right-click fires `contextmenu`, never `click`, so this
+    // can't double-fire with the outside-click handler below.
     document.addEventListener("contextmenu", (e) => {
       e.preventDefault();
-      openSettingsPanel();
+      if (settingsPanelVisible()) {
+        closeSettingsDialog();
+        closeSettingsPanel();
+      } else {
+        openSettingsPanel();
+      }
     });
     settingsPanelEl.addEventListener("click", (e) => {
       const tabBtn = e.target.closest(".settings-tab");
@@ -659,62 +759,54 @@ document.addEventListener("DOMContentLoaded", async () => {
         renderSettingsPanel();
         return;
       }
-      const item = e.target.closest("[data-action]:not([disabled])");
+      const card = e.target.closest(".settings-card:not([disabled])");
+      if (!card) return;
+      const item = findSettingsItem(card.dataset.action);
       if (!item) return;
-      const action = item.dataset.action;
-      const value = item.dataset.value || "";
-      switch (action) {
-        case "toggle-title":
-          setStored(STORAGE_KEYS.showTitle, getStored(STORAGE_KEYS.showTitle, ["true", "false"], "true") === "true" ? "false" : "true");
-          updatePrompt();
-          break;
-        case "toggle-time":
-          setStored(STORAGE_KEYS.showTime, getStored(STORAGE_KEYS.showTime, ["true", "false"], "false") === "true" ? "false" : "true");
-          updateTime();
-          break;
-        case "set-background":
-          setStored(STORAGE_KEYS.backgroundStyle, value);
-          updateDots();
-          break;
-        case "toggle-go":
-          setStored(STORAGE_KEYS.showGo, getStored(STORAGE_KEYS.showGo, ["true", "false"], "true") === "true" ? "false" : "true");
-          updateGo();
-          break;
-        case "toggle-clickfx":
-          setStored(STORAGE_KEYS.showClickFx, getStored(STORAGE_KEYS.showClickFx, ["true", "false"], "true") === "true" ? "false" : "true");
-          updateClickFx();
-          break;
-        case "set-theme":
-          applyTheme(value);
-          break;
-        case "set-engine":
-          setStored(STORAGE_KEYS.searchEngine, value);
-          break;
-        case "set-clock":
-          setStored(STORAGE_KEYS.clockFormat, value);
-          updateTime();
-          break;
-        case "set-style":
-          setStored(STORAGE_KEYS.searchStyle, value);
-          updateSearchStyle();
-          break;
-        case "set-lang":
-          setStored(STORAGE_KEYS.lang, value);
-          applyDocumentLang();
-          updateUI();
-          // Re-render the tab bar too: the tab labels are translated text.
-          settingsPanelEl.querySelectorAll(".settings-tab").forEach((btn) => {
-            btn.textContent = t(btn.dataset.tab);
-          });
-          break;
+      if (item.kind === "toggle") {
+        toggleCurrent(item.action);
+        renderSettingsPanel();
+      } else if (item.kind === "select") {
+        openSettingsDialog(item);
       }
-      renderSettingsPanel();
     });
+    // Vertical wheel scrolls the card strip sideways -- it is the only overflow
+    // axis, so without this the wheel would do nothing over the panel.
+    settingsPanelEl.querySelector(".settings-content").addEventListener("wheel", (e) => {
+      const strip = e.currentTarget;
+      if (e.deltaY === 0 || strip.scrollWidth <= strip.clientWidth) return;
+      e.preventDefault();
+      strip.scrollLeft += e.deltaY;
+    }, { passive: false });
+    settingsDialogEl.addEventListener("click", (e) => {
+      if (e.target.closest(".settings-dialog-close")) {
+        closeSettingsDialog();
+        return;
+      }
+      const option = e.target.closest(".settings-dialog-option");
+      if (option && settingsDialogItem) {
+        applySetting(settingsDialogItem.action, option.dataset.value);
+        closeSettingsDialog();
+        renderSettingsPanel();
+        return;
+      }
+      // Clicking the backdrop (but not the dialog itself) dismisses it.
+      if (!e.target.closest(".settings-dialog")) closeSettingsDialog();
+    });
+    // The panel collapses on an outside click -- and on nothing else. The dialog
+    // is a sibling of the panel (both are children of <body>), so a click on a
+    // dialog option used to read as "outside the panel" and tore the panel down
+    // along with the dialog; exclude it explicitly.
     document.addEventListener("click", (e) => {
-      if (settingsPanelVisible() && !settingsPanelEl.contains(e.target)) closeSettingsPanel();
+      if (!settingsPanelVisible()) return;
+      if (settingsPanelEl.contains(e.target)) return;
+      if (settingsDialogEl && settingsDialogEl.contains(e.target)) return;
+      closeSettingsPanel();
     });
+    // Escape dismisses the dialog only. The panel itself collapses on a
+    // right-click or an outside click, never on a keystroke.
     document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") closeSettingsPanel();
+      if (e.key === "Escape" && settingsDialogVisible()) closeSettingsDialog();
     });
     const form = document.getElementById("search-form");
     const input = document.getElementById("search-input");

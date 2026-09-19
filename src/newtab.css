@@ -102,6 +102,40 @@ body.bg-stripes {
   text-align: center;
 }
 
+/* Shortcut row. A sibling of .main, not a child: it keeps the page's original
+   bottom-centre placement, and being fixed it stays out of the flow so the
+   search box is still centred in the viewport. Hidden outright when empty. */
+.shortcuts {
+  position: fixed;
+  bottom: 2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 2rem;
+  max-width: 90vw;
+  z-index: 100;
+}
+
+.shortcuts.hidden {
+  display: none;
+}
+
+.shortcut-item {
+  max-width: 12rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 0.2s;
+}
+
+.shortcut-item:hover {
+  color: var(--fg);
+}
+
 .prompt {
   font-family: 'Latin Mono', 'Sarasa UI SC', 'Sarasa UI TC', 'Sarasa UI J',
     'Sarasa UI K', 'Roboto', 'PingFang SC',
@@ -284,7 +318,7 @@ body.bg-stripes {
   font-style: normal;
   font-weight: 900;
   font-display: block;
-  src: url('./fa-solid-900-subset.woff2?v=2da7e653') format('woff2');
+  src: url('./fa-solid-900-subset.woff2?v=3b15cccf') format('woff2');
 }
 
 .fa-solid {
@@ -316,6 +350,8 @@ body.bg-stripes {
 .fa-border-top-left { --fa: "\f853"; }
 .fa-border-all { --fa: "\f84c"; }
 .fa-text-width { --fa: "\f035"; }
+.fa-link { --fa: "\f0c1"; }
+.fa-square-plus { --fa: "\f0fe"; }
 
 /* Selection marker used by the settings dialog — square to match the
    right-angled frame of the menu and the tiles. */
@@ -349,8 +385,8 @@ body.bg-stripes {
   right: 10%;
   bottom: 0;
   /* Height follows the tile strip. It stays constant across tabs because the
-     strip carries a min-height of one tile row -- the empty Shortcuts tab
-     cannot collapse the panel. */
+     strip carries a min-height of one tile row, so a tab holding a single tile
+     (the Shortcuts tab with nothing saved) cannot collapse the panel. */
   display: flex;
   flex-direction: column;
   background: var(--bg);
@@ -399,7 +435,7 @@ body.bg-stripes {
 .settings-content {
   flex: 1;
   /* One tile row plus the strip's own vertical padding (1rem + 1.25rem), so the
-     panel keeps the same height on the empty Shortcuts tab. */
+     panel keeps the same height on a tab that holds a single tile. */
   min-height: calc(var(--settings-tile) + 2.25rem);
   display: flex;
   align-items: center;
@@ -592,6 +628,17 @@ body.bg-stripes {
   min-width: 360px;
 }
 
+/* Shortcut variant: three stacked fields (title / url / weight) over the same
+   error line and action row as the number variant. The fields are separated by a
+   smaller gap than the one below the header. */
+.settings-dialog-shortcut {
+  min-width: 360px;
+}
+
+.settings-dialog-shortcut .settings-dialog-field + .settings-dialog-field {
+  padding-top: 0.6rem;
+}
+
 .settings-dialog-field {
   padding: 0.9rem 1.25rem 0;
 }
@@ -630,8 +677,31 @@ body.bg-stripes {
 
 .settings-dialog-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 0.6rem;
   padding: 0.25rem 1.25rem 1rem;
+}
+
+/* Destructive action, pushed to the far end of the row so it cannot be hit on
+   the way to the confirm button. Outlined rather than filled: it is not the
+   default action. */
+.settings-dialog-delete {
+  margin-right: auto;
+  padding: 0.5rem 1.3rem;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 0;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.settings-dialog-delete:hover {
+  color: var(--fg);
+  border-color: var(--fg);
 }
 
 .settings-dialog-confirm {

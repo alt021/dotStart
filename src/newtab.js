@@ -11,7 +11,8 @@ const STORAGE_KEYS = {
   searchRadius: "searchRadius",
   searchBorder: "searchBorder",
   searchLength: "searchLength",
-  showClickFx: "showClickFx"
+  showClickFx: "showClickFx",
+  shortcuts: "shortcuts"
 };
 const SEARCH_URLS = {
   google: "https://www.google.com/search?q=",
@@ -36,6 +37,16 @@ const SEARCH_LIMITS = {
   border: { min: 1, max: 10, default: 1 },
   length: { min: 200, max: 1200, default: 500 }
 };
+// User-defined shortcuts shown in the bottom row. Four is the cap: it keeps the
+// row on one line at any window width, and matches the 1-4 weight scale below.
+const SHORTCUT_MAX = 4;
+// Shortcut weight decides the left-to-right order (heaviest first). Unlike the
+// search box sizes there is no "0 = keep the default" here -- an EMPTY weight
+// field is how the dialog asks for the default, and 0 is simply out of range.
+const SHORTCUT_WEIGHT = { min: 1, max: 4, default: 1 };
+// Longest title the field accepts. A title longer than this would not fit a tile
+// or the bottom row without being cut off mid-word.
+const SHORTCUT_TITLE_MAX = 60;
 const I18N = {
   en: {
     searchTitle: "Search title",
@@ -82,6 +93,16 @@ const I18N = {
     comingSoon: "Coming soon",
     on: "On",
     off: "Off",
+    addShortcut: "Add shortcut",
+    editShortcut: "Edit shortcut",
+    shortcutTitle: "Title",
+    shortcutUrl: "URL",
+    weight: "Weight",
+    weightHint: "Weight {min}-{max} · blank = {default}",
+    errorTitle: "Enter a title",
+    errorUrl: "Enter a web address",
+    errorWeight: "Weight must be a whole number from {min} to {max}",
+    delete: "Delete",
     close: "Close"
   },
   zh: {
@@ -129,6 +150,16 @@ const I18N = {
     comingSoon: "即将推出",
     on: "已启用",
     off: "已停用",
+    addShortcut: "添加快捷方式",
+    editShortcut: "编辑快捷方式",
+    shortcutTitle: "标题",
+    shortcutUrl: "网址",
+    weight: "权重",
+    weightHint: "权重 {min}–{max} · 留空 = {default}",
+    errorTitle: "请输入标题",
+    errorUrl: "请输入网址",
+    errorWeight: "权重需为 {min}–{max} 之间的整数",
+    delete: "删除",
     close: "关闭"
   }
 };
@@ -260,6 +291,17 @@ function updateGo() {
   const showGo = getStored(STORAGE_KEYS.showGo, ["true", "false"], "true") === "true";
   if (goBtn) goBtn.classList.toggle("hidden", !showGo);
 }
+// The bottom row -- the shortcut placement this page has always used. Rendered
+// in display order, as plain anchors: no click handler is needed, and every href
+// has been through normalizeURL(), so a script url cannot reach the attribute.
+function updateShortcuts() {
+  const row = document.getElementById("shortcuts");
+  if (!row) return;
+  const items = readShortcuts();
+  row.innerHTML = items.map((s) =>
+    `<a class="shortcut-item" href="${escapeHTML(s.url)}">${escapeHTML(s.title)}</a>`).join("");
+  row.classList.toggle("hidden", items.length === 0);
+}
 // A value is acceptable when it is a whole number inside the range -- or the
 // documented "keep the default" zero, which every numeric search box setting
 // accepts. Single source of truth for both the dialog's validation and
@@ -300,10 +342,106 @@ function updateSearchStyle() {
   root.setProperty("--search-border", styleSize(STORAGE_KEYS.searchBorder, SEARCH_LIMITS.border));
   root.setProperty("--search-length", styleSize(STORAGE_KEYS.searchLength, SEARCH_LIMITS.length));
 }
+// Escapes the characters that are special in markup, quote included: shortcut
+// titles and urls are user input and land in element text and in an href
+// attribute. Written as a pure string transform rather than the usual
+// textContent/innerHTML round-trip -- that trick needs a real DOM, so it would
+// silently produce "" everywhere a DOM stub stands in (the smoke tests).
+const HTML_ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 function escapeHTML(str) {
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
+  return String(str).replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
+}
+// Shortcuts are one JSON array under a single key, capped at SHORTCUT_MAX
+// entries: { title, url, weight }. Every read goes through the sanitiser --
+// localStorage is hand-writable, and a half-written array must not be able to
+// break the page or slip a script url into an href.
+//
+// A colon only introduces a scheme when it is not followed by a digit, so
+// "example.com:8080" stays a host:port instead of being read as an
+// "example.com:" protocol. Script-bearing schemes are refused outright: the url
+// ends up in an <a href>, where javascript: would run as code.
+const SHORTCUT_SCHEME_RE = /^[a-z][a-z0-9+.-]*:(?!\d)/i;
+const UNSAFE_SHORTCUT_RE = /^(?:javascript|data|vbscript):/i;
+// Returns the url to store, or null when it cannot be used. A bare host gets
+// https:// prepended; anything that already names a protocol is kept verbatim.
+function normalizeURL(raw) {
+  const s = String(raw === null || raw === undefined ? "" : raw).trim();
+  if (s === "") return null;
+  if (!SHORTCUT_SCHEME_RE.test(s)) return "https://" + s;
+  return UNSAFE_SHORTCUT_RE.test(s) ? null : s;
+}
+// A weight is a whole number in [min, max]. Deliberately not isValidLimit():
+// that one carries the "0 keeps the default" rule of the search box sizes,
+// which does not apply here -- an empty field is how the weight asks for the
+// default, so 0 is plain out of range.
+function isValidWeight(n, spec) {
+  return Number.isInteger(n) && n >= spec.min && n <= spec.max;
+}
+// Coerces one stored entry into a usable shortcut, or null if it is unusable.
+function sanitizeShortcut(entry) {
+  if (!entry || typeof entry !== "object") return null;
+  const title = typeof entry.title === "string" ? entry.title.trim() : "";
+  const url = normalizeURL(entry.url);
+  if (title === "" || url === null) return null;
+  const n = Number(entry.weight);
+  return {
+    title: title.slice(0, SHORTCUT_TITLE_MAX),
+    url,
+    weight: isValidWeight(n, SHORTCUT_WEIGHT) ? n : SHORTCUT_WEIGHT.default
+  };
+}
+// Display order: heaviest weight first, ties broken by title. This is the ONLY
+// order in the project -- readShortcuts() sorts on the way out and
+// writeShortcuts() sorts on the way in -- so a tile's index in the panel, its
+// position in the bottom row and its place in storage all agree.
+function sortShortcuts(list) {
+  return list.slice().sort((a, b) =>
+    (b.weight - a.weight) ||
+    a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: "base" }));
+}
+// Returns the shortcuts in DISPLAY order -- sorted, always, not just when they
+// happen to have been written by writeShortcuts(). The row, the tiles and every
+// index-addressed edit all read through here, so "index 0" means the leftmost
+// shortcut no matter how the stored array was produced (a hand-edit, a partial
+// write, an older version). Leave the sort in.
+function readShortcuts() {
+  let parsed;
+  try {
+    parsed = JSON.parse(localStorage.getItem(STORAGE_KEYS.shortcuts) || "[]");
+  } catch (_) {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const out = [];
+  for (const entry of parsed) {
+    if (out.length >= SHORTCUT_MAX) break;
+    const shortcut = sanitizeShortcut(entry);
+    if (shortcut) out.push(shortcut);
+  }
+  return sortShortcuts(out);
+}
+function writeShortcuts(list) {
+  setStored(STORAGE_KEYS.shortcuts, JSON.stringify(sortShortcuts(list.slice(0, SHORTCUT_MAX))));
+}
+// index -1 appends a new shortcut. Saving past the cap is dropped rather than
+// silently trimming an existing entry.
+function saveShortcut(index, entry) {
+  const list = readShortcuts();
+  if (index < 0) {
+    if (list.length >= SHORTCUT_MAX) return;
+    list.push(entry);
+  } else if (index < list.length) {
+    list[index] = entry;
+  } else {
+    return;
+  }
+  writeShortcuts(list);
+}
+function deleteShortcut(index) {
+  const list = readShortcuts();
+  if (index < 0 || index >= list.length) return;
+  list.splice(index, 1);
+  writeShortcuts(list);
 }
 const LICENSE_PLACEHOLDER = "__LICENSE_PLACEHOLDER__";
 let cachedLicenseText = null;
@@ -640,8 +778,31 @@ function getSettingsItems(tab) {
     return items;
   }
   if (tab === "shortcutsTab") {
-    // Reserved for a future shortcuts implementation.
-    return [];
+    const list = readShortcuts();
+    // One tile per shortcut -- click to edit or delete -- then the add tile. The
+    // list is already in display order, so a tile's `index` is its stored index.
+    const items = list.map((s, index) => ({
+      action: `shortcut-${index}`,
+      icon: "fa-link",
+      kind: "shortcut",
+      index,
+      name: s.title,
+      url: s.url,
+      weight: s.weight,
+      statusText: `${t("weight")} ${s.weight}`
+    }));
+    items.push({
+      action: "add-shortcut",
+      icon: "fa-square-plus",
+      labelKey: "addShortcut",
+      kind: "shortcut",
+      index: -1,
+      // Not the "disabled" kind: this tile is inert only while the cap is
+      // reached, and it has to come back to life the moment one is deleted.
+      disabled: list.length >= SHORTCUT_MAX,
+      statusText: `${list.length} / ${SHORTCUT_MAX}`
+    });
+    return items;
   }
   return [
     { action: "set-lang", icon: "fa-language", labelKey: "language", kind: "cycle", key: STORAGE_KEYS.lang, fallback: "en",
@@ -658,7 +819,8 @@ function itemValue(item) {
 // The values a setting can hold, in the order its options declare them. "cycle"
 // is included here, which is why a two-value list needs no special case.
 function itemValues(item) {
-  return item.kind === "toggle" ? ["true", "false"] : item.options.map((o) => o[0]);
+  if (item.kind === "toggle") return ["true", "false"];
+  return (item.options || []).map((o) => o[0]);
 }
 function itemStatus(item) {
   if (item.kind === "toggle") return t(itemValue(item) === "true" ? "on" : "off");
@@ -666,14 +828,23 @@ function itemStatus(item) {
   const option = item.options.find((o) => o[0] === itemValue(item));
   return option ? t(option[1]) : "";
 }
+// A card carries either a static `labelKey` or a runtime `name` (a shortcut's
+// own title), and either a computed `itemStatus()` or a literal `statusText`.
+// `disabled` is normally the "disabled" kind, but a shortcut tile can also be
+// disabled at runtime -- the add tile once the list is full.
 function cardHTML(item) {
-  const disabled = item.kind === "disabled";
+  const disabled = item.kind === "disabled" || item.disabled === true;
+  const name = item.name === undefined ? t(item.labelKey) : escapeHTML(item.name);
+  let status;
+  if (item.statusText !== undefined) status = item.statusText;
+  else if (disabled) status = t(item.statusKey);
+  else status = itemStatus(item);
   return `
     <button class="settings-card${disabled ? " settings-card-disabled" : ""}"
             data-action="${item.action}"${disabled ? " disabled" : ""}>
       <span class="settings-card-icon"><i class="fa-solid ${item.icon}" aria-hidden="true"></i></span>
-      <span class="settings-card-name">${t(item.labelKey)}</span>
-      <span class="settings-card-status">${disabled ? t(item.statusKey) : itemStatus(item)}</span>
+      <span class="settings-card-name">${name}</span>
+      <span class="settings-card-status">${status}</span>
     </button>
   `;
 }
@@ -712,15 +883,80 @@ function settingsPanelVisible() {
 function numberHint(spec) {
   return fmt(t("rangeHint"), { min: spec.min, max: spec.max, default: spec.default });
 }
+// Same contract for the shortcut weight field: the accepted range, and what an
+// empty field resolves to. Built from SHORTCUT_WEIGHT, never hard-coded.
+function weightHint(spec) {
+  return fmt(t("weightHint"), { min: spec.min, max: spec.max, default: spec.default });
+}
+// Reports why a dialog field was refused and puts the caret back in it.
+function flagDialogError(errorEl, inputEl, message) {
+  errorEl.textContent = message;
+  inputEl.classList.add("invalid");
+  inputEl.focus();
+  if (typeof inputEl.select === "function") inputEl.select();
+}
 function openSettingsDialog(item) {
   if (!settingsDialogEl) return;
   settingsDialogItem = item;
-  const current = itemValue(item);
-  settingsDialogEl.querySelector(".settings-dialog-title").textContent = t(item.labelKey);
+  const titleEl = settingsDialogEl.querySelector(".settings-dialog-title");
   const body = settingsDialogEl.querySelector(".settings-dialog-options");
   const dialog = settingsDialogEl.querySelector(".settings-dialog");
   const isNumber = item.kind === "number";
+  const isShortcut = item.kind === "shortcut";
   dialog.classList.toggle("settings-dialog-number", isNumber);
+  dialog.classList.toggle("settings-dialog-shortcut", isShortcut);
+  if (isShortcut) {
+    const isNew = item.index < 0;
+    titleEl.textContent = t(isNew ? "addShortcut" : "editShortcut");
+    // Three fields over the number dialog's error line, action row and styling.
+    // They are prefilled through the `value` property, never through the markup:
+    // a title and a url are user input and would be parsed as HTML there.
+    body.innerHTML = `
+      <div class="settings-dialog-field">
+        <input class="settings-dialog-input" data-field="title" type="text" autocomplete="off"
+               spellcheck="false" maxlength="${SHORTCUT_TITLE_MAX}" aria-label="${t("shortcutTitle")}"
+               placeholder="${t("shortcutTitle")}">
+      </div>
+      <div class="settings-dialog-field">
+        <input class="settings-dialog-input" data-field="url" type="text" autocomplete="off"
+               spellcheck="false" aria-label="${t("shortcutUrl")}"
+               placeholder="${t("shortcutUrl")}">
+      </div>
+      <div class="settings-dialog-field">
+        <input class="settings-dialog-input" data-field="weight" type="text" inputmode="numeric"
+               autocomplete="off" spellcheck="false" aria-label="${t("weight")}"
+               placeholder="${weightHint(SHORTCUT_WEIGHT)}">
+      </div>
+      <div class="settings-dialog-error" aria-live="polite"></div>
+      <div class="settings-dialog-actions">
+        ${isNew ? "" : `<button class="settings-dialog-delete" type="button">${t("delete")}</button>`}
+        <button class="settings-dialog-confirm" type="button">${t("confirm")}</button>
+      </div>
+    `;
+    const fields = {
+      title: body.querySelector('[data-field="title"]'),
+      url: body.querySelector('[data-field="url"]'),
+      weight: body.querySelector('[data-field="weight"]')
+    };
+    if (!isNew) {
+      fields.title.value = item.name;
+      fields.url.value = item.url;
+      fields.weight.value = String(item.weight);
+    }
+    const errorEl = body.querySelector(".settings-dialog-error");
+    Object.keys(fields).forEach((key) => {
+      const el = fields[key];
+      el.addEventListener("input", () => {
+        el.classList.remove("invalid");
+        errorEl.textContent = "";
+      });
+    });
+    settingsDialogEl.classList.add("visible");
+    fields.title.focus();
+    return;
+  }
+  const current = itemValue(item);
+  titleEl.textContent = t(item.labelKey);
   if (isNumber) {
     // Prefilled with the value in force; the hint lives in the placeholder, and
     // the error line is always present so showing one never shifts the button.
@@ -767,15 +1003,58 @@ function confirmNumberSetting() {
   const raw = input.value.trim();
   const n = raw === "" ? NaN : Number(raw);
   if (!isValidLimit(n, spec)) {
-    errorEl.textContent = fmt(t("invalidNumber"), { min: spec.min, max: spec.max });
-    input.classList.add("invalid");
-    input.focus();
-    input.select();
+    flagDialogError(errorEl, input, fmt(t("invalidNumber"), { min: spec.min, max: spec.max }));
     return;
   }
   applySetting(item.action, String(n));
   closeSettingsDialog();
   renderSettingsPanel();
+}
+// Reads the shortcut dialog's three fields and either saves or reports the first
+// problem. A blank weight means the default; a blank title or an unusable url is
+// refused rather than guessed at.
+function confirmShortcutDialog() {
+  const item = settingsDialogItem;
+  if (!item || item.kind !== "shortcut" || !settingsDialogEl) return;
+  const body = settingsDialogEl.querySelector(".settings-dialog-options");
+  // The error line lives INSIDE the options container. Querying it off the
+  // overlay instead finds nothing in a real browser and the dialog would then
+  // refuse to save in total silence -- so keep every field lookup on `body`.
+  const errorEl = body.querySelector(".settings-dialog-error");
+  const titleEl = body.querySelector('[data-field="title"]');
+  const urlEl = body.querySelector('[data-field="url"]');
+  const weightEl = body.querySelector('[data-field="weight"]');
+  if (!titleEl || !urlEl || !weightEl || !errorEl) return;
+  const title = titleEl.value.trim();
+  if (title === "") {
+    flagDialogError(errorEl, titleEl, t("errorTitle"));
+    return;
+  }
+  const url = normalizeURL(urlEl.value);
+  if (url === null) {
+    flagDialogError(errorEl, urlEl, t("errorUrl"));
+    return;
+  }
+  const rawWeight = weightEl.value.trim();
+  const weight = rawWeight === "" ? SHORTCUT_WEIGHT.default : Number(rawWeight);
+  if (!isValidWeight(weight, SHORTCUT_WEIGHT)) {
+    flagDialogError(errorEl, weightEl,
+      fmt(t("errorWeight"), { min: SHORTCUT_WEIGHT.min, max: SHORTCUT_WEIGHT.max }));
+    return;
+  }
+  saveShortcut(item.index, { title: title.slice(0, SHORTCUT_TITLE_MAX), url, weight });
+  closeSettingsDialog();
+  renderSettingsPanel();
+  updateShortcuts();
+}
+// Deleting is offered while editing an existing shortcut, never on the add tile.
+function confirmDeleteShortcut() {
+  const item = settingsDialogItem;
+  if (!item || item.kind !== "shortcut" || item.index < 0) return;
+  deleteShortcut(item.index);
+  closeSettingsDialog();
+  renderSettingsPanel();
+  updateShortcuts();
 }
 function closeSettingsDialog() {
   if (settingsDialogEl) settingsDialogEl.classList.remove("visible");
@@ -879,6 +1158,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           </div>
         </form>
       </div>
+      <div class="shortcuts" id="shortcuts"></div>
     `;
     updateDots();
     updateGo();
@@ -886,6 +1166,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     updatePrompt();
     updateTime();
     updateUI();
+    updateShortcuts();
     updateClickFx();
     setInterval(updateTime, 1e3);
     showOnboarding().catch((e) => console.error("onboarding failed:", e));
@@ -944,8 +1225,10 @@ document.addEventListener("DOMContentLoaded", async () => {
       } else if (item.kind === "cycle") {
         cycleCurrent(item.action);
         renderSettingsPanel();
-      } else if (item.kind === "select" || item.kind === "number") {
-        // Both open a dialog: a list of values for selects, a field for numbers.
+      } else if (item.kind === "select" || item.kind === "number" || item.kind === "shortcut") {
+        // All three open a dialog: a list of values, one field, or the shortcut
+        // form (title / url / weight). The add tile is a "shortcut" item with
+        // index -1, so it lands here too.
         openSettingsDialog(item);
       }
     });
@@ -963,7 +1246,12 @@ document.addEventListener("DOMContentLoaded", async () => {
         return;
       }
       if (e.target.closest(".settings-dialog-confirm")) {
-        confirmNumberSetting();
+        if (settingsDialogItem && settingsDialogItem.kind === "shortcut") confirmShortcutDialog();
+        else confirmNumberSetting();
+        return;
+      }
+      if (e.target.closest(".settings-dialog-delete")) {
+        confirmDeleteShortcut();
         return;
       }
       const option = e.target.closest(".settings-dialog-option");
@@ -976,12 +1264,14 @@ document.addEventListener("DOMContentLoaded", async () => {
       // Clicking the backdrop (but not the dialog itself) dismisses it.
       if (!e.target.closest(".settings-dialog")) closeSettingsDialog();
     });
-    // Enter confirms the number dialog. Escape (handled on document) closes it.
+    // Enter confirms the open dialog. Escape (handled on document) closes it.
     settingsDialogEl.addEventListener("keydown", (e) => {
       if (e.key !== "Enter") return;
-      if (!settingsDialogItem || settingsDialogItem.kind !== "number") return;
+      const kind = settingsDialogItem && settingsDialogItem.kind;
+      if (kind !== "number" && kind !== "shortcut") return;
       e.preventDefault();
-      confirmNumberSetting();
+      if (kind === "shortcut") confirmShortcutDialog();
+      else confirmNumberSetting();
     });
     // The panel collapses on an outside click -- and on nothing else.
     //

@@ -200,13 +200,17 @@ function detectBrowserLang() {
 // The namespace that can run a query through the browser's OWN default search
 // engine, or null where there is none to be had. Chrome (>= 87) exposes
 // chrome.search, Firefox (>= 111) browser.search; both are probed so callers
-// never have to know which browser this is. Capability, not sniffing: Firefox
-// 109/110 -- the versions before its search.query shipped -- have the namespace
-// but not the method, and must not be offered an engine that would do nothing.
+// never have to know which browser this is, with `browser` first -- Firefox
+// publishes that one natively (promise-based) and only aliases it as `chrome`,
+// so the native form is the safer call there.
+//
+// Capability, not sniffing: the probe asks for the METHOD, because Firefox
+// 109/110 -- the versions before its search.query shipped -- have the `search`
+// namespace without it, and must not be offered an engine that does nothing.
 function defaultEngineAPI() {
   const namespaces = [];
-  if (typeof chrome !== "undefined") namespaces.push(chrome);
   if (typeof browser !== "undefined") namespaces.push(browser);
+  if (typeof chrome !== "undefined") namespaces.push(chrome);
   const found = namespaces.find((ns) => ns.search && typeof ns.search.query === "function");
   return found ? found.search : null;
 }

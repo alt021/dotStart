@@ -27,15 +27,14 @@ const SEARCH_STYLES = ["modern", "geek"];
 // Old value -> new value. getStored() would fall back to "modern" for any
 // unknown value, which would silently promote underline users, so map instead.
 const LEGACY_SEARCH_STYLES = { square: "modern", rounded: "modern", line: "geek" };
-// Allowed ranges, in px, for the numeric search box settings. `default` is what
-// is used when nothing is stored. `zeroMeansDefault` marks the settings where a
-// stored 0 is the documented "keep the default" value (radius, length); border
-// weight leaves it false, so 0 is refused -- a frameless box is what "geek"
-// already is. Keep `default` in step with the fallbacks in newtab.css.
+// Allowed ranges, in px, for the numeric search box settings. `default` is both
+// what is used when nothing is stored and what a stored 0 means: 0 is the
+// documented "keep the default" entry for every one of these settings. Keep
+// `default` in step with the fallbacks in newtab.css.
 const SEARCH_LIMITS = {
-  radius: { min: 0, max: 60, default: 8, zeroMeansDefault: true },
-  border: { min: 1, max: 10, default: 1, zeroMeansDefault: false },
-  length: { min: 200, max: 1200, default: 500, zeroMeansDefault: true }
+  radius: { min: 1, max: 60, default: 8 },
+  border: { min: 1, max: 10, default: 1 },
+  length: { min: 200, max: 1200, default: 500 }
 };
 const I18N = {
   en: {
@@ -72,9 +71,8 @@ const I18N = {
     searchRadius: "Corner Radius",
     searchBorder: "Border Weight",
     searchLength: "Box Length",
-    rangeWithDefault: "Range {min}-{max}px, 0 keeps the default",
-    rangeNoZero: "Range {min}-{max}px, 0 is not allowed",
-    invalidNumber: "Enter a whole number from {min} to {max}",
+    rangeHint: "Range {min}-{max}px · 0 = default ({default}px)",
+    invalidNumber: "Enter a whole number from {min} to {max}, or 0",
     confirm: "OK",
     appearance: "Appearance",
     searchBoxTab: "Search Box",
@@ -120,9 +118,8 @@ const I18N = {
     searchRadius: "圆角大小",
     searchBorder: "框线粗细",
     searchLength: "搜索框长度",
-    rangeWithDefault: "范围 {min}–{max}px，0 取默认值",
-    rangeNoZero: "范围 {min}–{max}px，不可为 0",
-    invalidNumber: "请输入 {min}–{max} 之间的整数",
+    rangeHint: "范围 {min}–{max}px · 0 = 默认（{default}px）",
+    invalidNumber: "请输入 {min}–{max} 之间的整数，或 0",
     confirm: "确定",
     appearance: "外观",
     searchBoxTab: "搜索框",
@@ -264,23 +261,22 @@ function updateGo() {
   if (goBtn) goBtn.classList.toggle("hidden", !showGo);
 }
 // A value is acceptable when it is a whole number inside the range -- or the
-// documented "keep the default" zero, which only some settings accept (radius
-// and length; never the border weight). Single source of truth for both the
-// dialog's validation and readLimit() below, so a rejected input and a stored
-// value can never disagree about what 0 means.
+// documented "keep the default" zero, which every numeric search box setting
+// accepts. Single source of truth for both the dialog's validation and
+// readLimit() below, so a rejected input and a stored value can never disagree
+// about what 0 means.
 function isValidLimit(n, spec) {
   if (!Number.isInteger(n)) return false;
-  if (n === 0) return !!spec.zeroMeansDefault;
-  return n >= spec.min && n <= spec.max;
+  return n === 0 || (n >= spec.min && n <= spec.max);
 }
 // Resolves a stored numeric setting to the value actually in use: anything
-// missing, non-integer, out of range -- or 0 where 0 means "keep the default"
-// -- becomes the default from SEARCH_LIMITS. So a stored 0 and a stored default
+// missing, non-integer, or out of range -- and the "keep the default" 0 --
+// becomes the default from SEARCH_LIMITS. So a stored 0 and a stored default
 // render identically, which is what the panel reports too.
 function readLimit(key, spec) {
   const raw = localStorage.getItem(key);
   const n = raw === null || raw.trim() === "" ? NaN : Number(raw.trim());
-  if (n === 0 && spec.zeroMeansDefault) return spec.default;
+  if (n === 0) return spec.default;
   return isValidLimit(n, spec) ? n : spec.default;
 }
 function styleSize(key, spec) {
@@ -581,7 +577,10 @@ function search(query) {
 // Each setting renders as a square tile in a strip: an icon plate on top (Font
 // Awesome Free Solid -- the shipped font is subset, see newtab.css), then the
 // name and its current value below it, all centred and without a divider.
-// Toggles flip on click; multi-value settings open a dialog to pick from.
+//
+// Kinds: "toggle" flips a boolean, "cycle" steps through its two options, and
+// "select" (three or more options) or "number" opens a dialog. A two-option
+// setting is always a "cycle": a menu for two choices is a needless extra step.
 const SETTINGS_TABS = ["appearance", "searchBoxTab", "shortcutsTab", "advanced"];
 let settingsTab = "appearance";
 let settingsPanelEl = null;
@@ -602,7 +601,7 @@ function getSettingsItems(tab) {
     return [
       { action: "toggle-title", icon: "fa-heading", labelKey: "searchTitle", kind: "toggle", key: STORAGE_KEYS.showTitle, fallback: "true" },
       { action: "toggle-time", icon: "fa-clock", labelKey: "timeDisplay", kind: "toggle", key: STORAGE_KEYS.showTime, fallback: "false" },
-      { action: "set-clock", icon: "fa-stopwatch", labelKey: "clockFormat", kind: "select", key: STORAGE_KEYS.clockFormat, fallback: "24",
+      { action: "set-clock", icon: "fa-stopwatch", labelKey: "clockFormat", kind: "cycle", key: STORAGE_KEYS.clockFormat, fallback: "24",
         options: [["12", "clock12h"], ["24", "clock24h"]] },
       { action: "set-background", icon: "fa-fill-drip", labelKey: "background", kind: "select", key: STORAGE_KEYS.backgroundStyle, fallback: "blank",
         options: [["blank", "blankBackground"], ["dots", "dotBackground"], ["stripes", "stripeBackground"]] },
@@ -616,7 +615,7 @@ function getSettingsItems(tab) {
     const items = [
       { action: "set-engine", icon: "fa-magnifying-glass", labelKey: "searchEngine", kind: "select", key: STORAGE_KEYS.searchEngine, fallback: "browser",
         options: engineOptions() },
-      { action: "set-style", icon: "fa-shapes", labelKey: "searchStyle", kind: "select", key: STORAGE_KEYS.searchStyle, fallback: "modern",
+      { action: "set-style", icon: "fa-shapes", labelKey: "searchStyle", kind: "cycle", key: STORAGE_KEYS.searchStyle, fallback: "modern",
         options: SEARCH_STYLES.map((s) => [s, s]) }
     ];
     // The size settings are sandwiched between the style selector and the
@@ -640,7 +639,7 @@ function getSettingsItems(tab) {
     return [];
   }
   return [
-    { action: "set-lang", icon: "fa-language", labelKey: "language", kind: "select", key: STORAGE_KEYS.lang, fallback: "en",
+    { action: "set-lang", icon: "fa-language", labelKey: "language", kind: "cycle", key: STORAGE_KEYS.lang, fallback: "en",
       options: [["en", "english"], ["zh", "chinese"]] },
     { action: "custom-css", icon: "fa-code", labelKey: "customCSS", kind: "disabled", statusKey: "comingSoon" }
   ];
@@ -651,6 +650,8 @@ function itemValue(item) {
   if (item.kind === "number") return String(readLimit(item.key, item.spec));
   return getStored(item.key, itemValues(item), item.fallback);
 }
+// The values a setting can hold, in the order its options declare them. "cycle"
+// is included here, which is why a two-value list needs no special case.
 function itemValues(item) {
   return item.kind === "toggle" ? ["true", "false"] : item.options.map((o) => o[0]);
 }
@@ -700,10 +701,11 @@ function closeSettingsPanel() {
 function settingsPanelVisible() {
   return !!settingsPanelEl && settingsPanelEl.classList.contains("visible");
 }
-// Placeholder for the number dialog: it must state the range the field accepts,
-// and whether 0 is allowed (it means "keep the default" where it is).
+// Placeholder for the number dialog: it states the range the field accepts and
+// what the "keep the default" entry resolves to, so the field never asks for a
+// value the validation would then refuse.
 function numberHint(spec) {
-  return fmt(t(spec.zeroMeansDefault ? "rangeWithDefault" : "rangeNoZero"), { min: spec.min, max: spec.max });
+  return fmt(t("rangeHint"), { min: spec.min, max: spec.max, default: spec.default });
 }
 function openSettingsDialog(item) {
   if (!settingsDialogEl) return;
@@ -843,6 +845,17 @@ function toggleCurrent(action) {
   if (!item) return;
   applySetting(action, itemValue(item) === "true" ? "false" : "true");
 }
+// Steps a two-option setting to the other option, in the order the options are
+// declared, so the flip alternates in a fixed direction. Written against
+// itemValues() rather than hard-coding the pair: it stays correct if a list ever
+// grows a third entry (it would simply become a rotation).
+function cycleCurrent(action) {
+  const item = findSettingsItem(action);
+  if (!item) return;
+  const values = itemValues(item);
+  const next = values[(values.indexOf(itemValue(item)) + 1) % values.length];
+  applySetting(action, next);
+}
 document.addEventListener("DOMContentLoaded", async () => {
   migrateLegacySettings();
   applyDocumentLang();
@@ -922,6 +935,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (!item) return;
       if (item.kind === "toggle") {
         toggleCurrent(item.action);
+        renderSettingsPanel();
+      } else if (item.kind === "cycle") {
+        cycleCurrent(item.action);
         renderSettingsPanel();
       } else if (item.kind === "select" || item.kind === "number") {
         // Both open a dialog: a list of values for selects, a field for numbers.

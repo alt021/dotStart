@@ -252,6 +252,12 @@ body.bg-stripes {
    copy the printed codepoint into a new `.fa-<name>` rule underneath. The font
    and its licence live side by side in src/.
 
+   The `?v=` tail is the first 8 hex of the font's SHA-256, stamped by
+   fa_subset.py. Keep it: an extension resource URL is cached by the browser, so
+   a regenerated font under the SAME url is served from cache and the new glyphs
+   never appear (the icons added last would simply be blank). Bump it by
+   re-running the script, never by hand -- fa_verify.py fails if it goes stale.
+
    Icons: Font Awesome Free 7.3.1 by @fontawesome — https://fontawesome.com
    Licence: https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1) */
 @font-face {
@@ -259,7 +265,7 @@ body.bg-stripes {
   font-style: normal;
   font-weight: 900;
   font-display: block;
-  src: url('./fa-solid-900-subset.woff2') format('woff2');
+  src: url('./fa-solid-900-subset.woff2?v=2da7e653') format('woff2');
 }
 
 .fa-solid {
@@ -560,10 +566,11 @@ body.bg-stripes {
 
 /* Number variant of the dialog: one text field, a range hint in the
    placeholder, an inline error line and a confirm button. Widened so the hint
-   fits on one line. Monochrome throughout -- the error is signalled by text and
-   the input frame, not by a colour the theme does not own. */
+   ("Range 1-60px · 0 = default (8px)") fits on one line -- placeholders do not
+   wrap. Monochrome throughout -- the error is signalled by text and the input
+   frame, not by a colour the theme does not own. */
 .settings-dialog-number {
-  min-width: 300px;
+  min-width: 360px;
 }
 
 .settings-dialog-field {

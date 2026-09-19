@@ -508,11 +508,10 @@ function search(query) {
 // Bottom-sheet settings panel, opened by right-click. Four tabs:
 // Appearance / Search Box / Shortcuts (reserved, intentionally empty) / Advanced.
 //
-// Each setting renders as a square tile in a horizontally scrolling strip: an
-// icon plate on top (Font Awesome Free Solid -- the shipped font is subset, see
-// newtab.css), then the name and its current value below a hairline, both
-// centred. Toggles flip on click; multi-value settings open a dialog to pick
-// from.
+// Each setting renders as a square tile in a strip: an icon plate on top (Font
+// Awesome Free Solid -- the shipped font is subset, see newtab.css), then the
+// name and its current value below it, all centred and without a divider.
+// Toggles flip on click; multi-value settings open a dialog to pick from.
 const SETTINGS_TABS = ["appearance", "searchBoxTab", "shortcutsTab", "advanced"];
 let settingsTab = "appearance";
 let settingsPanelEl = null;

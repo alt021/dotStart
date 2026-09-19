@@ -441,6 +441,10 @@ body.bg-stripes {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* The glyph stays centred in the padding box, so a top padding of 2x the
+     wanted offset drops it by that offset -- it sits slightly below the middle
+     of the plate, closer to the label under it. */
+  padding-top: 0.75rem;
   font-size: 1.5rem;
   color: var(--fg);
   background: var(--blur-bg);
@@ -452,11 +456,11 @@ body.bg-stripes {
   color: var(--muted);
 }
 
-/* Name + value block, separated from the icon plate by a hairline. */
+/* Name + value block. No divider against the icon plate -- the plate's own
+   tint carries the separation. */
 .settings-card-name {
   width: 100%;
   padding: 0.55rem 0.6rem 0.1rem;
-  border-top: 1px solid var(--border);
   font-size: 0.85rem;
   line-height: 1.25;
   color: var(--fg);

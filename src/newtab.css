@@ -21,6 +21,9 @@
   --stripe: rgba(0, 0, 0, 0.02);
   --blur-bg: rgba(255, 255, 255, 0.2);
   --blur-bg-focus: rgba(255, 255, 255, 0.3);
+  /* Side of a settings tile (a square). Every other size in the panel is
+     derived from it, so retuning the panel means editing this one value. */
+  --settings-tile: 125px;
 }
 
 [data-theme="dark"] {
@@ -329,7 +332,9 @@ body.bg-stripes {
   left: 10%;
   right: 10%;
   bottom: 0;
-  height: 340px;
+  /* Height follows the tile strip. It stays constant across tabs because the
+     strip carries a min-height of one tile row -- the empty Shortcuts tab
+     cannot collapse the panel. */
   display: flex;
   flex-direction: column;
   background: var(--bg);
@@ -377,37 +382,31 @@ body.bg-stripes {
 /* Card strip — the only overflow axis is horizontal */
 .settings-content {
   flex: 1;
-  min-height: 0;
+  /* One tile row plus the strip's own vertical padding (1rem + 1.25rem), so the
+     panel keeps the same height on the empty Shortcuts tab. */
+  min-height: calc(var(--settings-tile) + 2.25rem);
   display: flex;
+  align-items: center;
   gap: 0.75rem;
   overflow-x: auto;
   overflow-y: hidden;
   padding: 1rem 1.5rem 1.25rem;
+  /* Scrollable but scrollbar-free: --settings-tile keeps every tab narrower than
+     the strip on a normal window, so the bar would only ever be dead weight.
+     Wheel-to-sideways still works (see the wheel handler in newtab.js). */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
 .settings-content::-webkit-scrollbar {
-  height: 8px;
-}
-
-.settings-content::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.settings-content::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 4px;
-}
-
-.settings-content::-webkit-scrollbar-thumb:hover {
-  background: var(--muted);
+  display: none;
 }
 
 .settings-card {
-  /* Square tile: the strip height defines the side, so cards stay 1:1 and
-     never stretch into rectangles. */
-  flex: 0 0 auto;
-  height: 100%;
-  aspect-ratio: 1 / 1;
+  /* Square tile, sized by --settings-tile alone. */
+  flex: 0 0 var(--settings-tile);
+  width: var(--settings-tile);
+  height: var(--settings-tile);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -442,7 +441,7 @@ body.bg-stripes {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 3rem;
+  font-size: 1.5rem;
   color: var(--fg);
   background: var(--blur-bg);
 }
@@ -456,9 +455,9 @@ body.bg-stripes {
 /* Name + value block, separated from the icon plate by a hairline. */
 .settings-card-name {
   width: 100%;
-  padding: 0.7rem 0.75rem 0.1rem;
+  padding: 0.55rem 0.6rem 0.1rem;
   border-top: 1px solid var(--border);
-  font-size: 0.92rem;
+  font-size: 0.85rem;
   line-height: 1.25;
   color: var(--fg);
   white-space: nowrap;
@@ -468,8 +467,8 @@ body.bg-stripes {
 
 .settings-card-status {
   width: 100%;
-  padding: 0.15rem 0.75rem 0.7rem;
-  font-size: 0.75rem;
+  padding: 0.1rem 0.6rem 0.5rem;
+  font-size: 0.7rem;
   line-height: 1.25;
   color: var(--muted);
   white-space: nowrap;

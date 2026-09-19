@@ -197,8 +197,18 @@ function detectBrowserLang() {
   const nav = navigator.language || navigator.userLanguage || "";
   return nav.toLowerCase().startsWith("zh") ? "zh" : "en";
 }
-function isFirefox() {
-  return typeof browser !== "undefined" && typeof browser.runtime?.getBrowserInfo === "function";
+// The namespace that can run a query through the browser's OWN default search
+// engine, or null where there is none to be had. Chrome (>= 87) exposes
+// chrome.search, Firefox (>= 111) browser.search; both are probed so callers
+// never have to know which browser this is. Capability, not sniffing: Firefox
+// 109/110 -- the versions before its search.query shipped -- have the namespace
+// but not the method, and must not be offered an engine that would do nothing.
+function defaultEngineAPI() {
+  const namespaces = [];
+  if (typeof chrome !== "undefined") namespaces.push(chrome);
+  if (typeof browser !== "undefined") namespaces.push(browser);
+  const found = namespaces.find((ns) => ns.search && typeof ns.search.query === "function");
+  return found ? found.search : null;
 }
 // Keep <html lang> and the document title in sync with the UI language.
 // newtab.html ships lang="en"/"New Tab" as a pre-JS fallback only.
@@ -705,12 +715,19 @@ function search(query) {
     return;
   }
   const engine = getStored(STORAGE_KEYS.searchEngine, SEARCH_ENGINES, "browser");
-  if (engine === "browser" && typeof chrome !== "undefined" && chrome.search && typeof chrome.search.query === "function") {
-    chrome.search.query({ text: query });
-    return;
+  if (engine === "browser") {
+    // Hand the query to the browser so its own default engine answers it. The
+    // provider is resolved per search rather than cached: a panel render and a
+    // submit can happen in either order, and this keeps one source of truth.
+    const api = defaultEngineAPI();
+    if (api) {
+      api.query({ text: query });
+      return;
+    }
   }
-  // Fallback: "browser" engine has no usable provider here (Firefox, or Chrome <87).
-  // Route to google unless another explicit engine is selected.
+  // Fallback: nothing can answer for "browser" here (Chrome < 87, Firefox < 111),
+  // or the stored engine is unusable. Route to google unless another explicit
+  // engine is selected.
   const fallback = engine && engine !== "browser" && SEARCH_URLS[engine] ? engine : "google";
   window.location.href = SEARCH_URLS[fallback] + encodeURIComponent(query);
 }
@@ -732,9 +749,9 @@ let settingsDialogItem = null;
 
 function engineOptions() {
   const options = [];
-  // chrome.search.query() does not exist on Firefox, so "browser default" would
-  // silently fail there -- it is not offered at all.
-  if (!isFirefox()) options.push(["browser", "browserDefault"]);
+  // Offered only where it can actually run: a browser without the API drops the
+  // entry rather than showing one that would be silently ignored.
+  if (defaultEngineAPI()) options.push(["browser", "browserDefault"]);
   options.push(["google", "google"], ["duckduckgo", "duckduckgo"], ["qwant", "qwant"],
     ["bing", "bing"], ["baidu", "baidu"]);
   return options;

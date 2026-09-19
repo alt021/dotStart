@@ -199,7 +199,7 @@ function updateTime() {
   if (!el) return;
   el.classList.toggle("hidden", !showTime);
   if (!showTime) return;
-  const now = /* @__PURE__ */ new Date();
+  const now = new Date();
   const format = getStored(STORAGE_KEYS.clockFormat, ["12", "24"], "24");
   if (format === "12") {
     const h = now.getHours();
@@ -538,16 +538,14 @@ function showSidebar(type, granted) {
   const panel = document.getElementById("sidebar-panel");
   const title = panel?.querySelector(".sidebar-header h3");
   const content = panel?.querySelector(".sidebar-content");
-  const footerLink = panel?.querySelector(".sidebar-footer-link");
-  const footer = panel?.querySelector(".sidebar-footer");
   const moreBtn = document.getElementById("sidebar-more");
   if (!overlay || !panel || !content) return;
   if (title) title.textContent = type === "bookmarks" ? t("bookmarks") : t("history");
   content.innerHTML = "";
   const chromeUrl = type === "bookmarks" ? "chrome://bookmarks" : "chrome://history";
-  // These two affordances open the browser's own manager, which is a chrome://
+  // The header affordance opens the browser's own manager, which is a chrome://
   // page. Firefox rejects chrome: URLs in tabs.create and has no equivalent
-  // page, so they are Chrome-only. (Firefox cannot reach this panel at all --
+  // page, so it is Chrome-only. (Firefox cannot reach this panel at all --
   // its only entry point, the shortcuts row, is hidden on that engine too.)
   const externalLinks = !isFirefox();
   if (moreBtn) {
@@ -555,14 +553,6 @@ function showSidebar(type, granted) {
     moreBtn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M6.25 4.5A1.75 1.75 0 0 0 4.5 6.25v11.5c0 .966.783 1.75 1.75 1.75h11.5a1.75 1.75 0 0 0 1.75-1.75v-4a.75.75 0 0 1 1.5 0v4A3.25 3.25 0 0 1 17.75 21H6.25A3.25 3.25 0 0 1 3 17.75V6.25A3.25 3.25 0 0 1 6.25 3h4a.75.75 0 0 1 0 1.5h-4ZM13 3.75a.75.75 0 0 1 .75-.75h6.5a.75.75 0 0 1 .75.75v6.5a.75.75 0 0 1-1.5 0V5.56l-5.22 5.22a.75.75 0 0 1-1.06-1.06l5.22-5.22h-4.69a.75.75 0 0 1-.75-.75Z"/></svg>';
     moreBtn.title = t("more");
     moreBtn.onclick = () => {
-      if (typeof chrome !== "undefined" && chrome.tabs) {
-        chrome.tabs.create({ url: chromeUrl });
-      }
-    };
-  }
-  if (footer) footer.style.display = externalLinks ? "" : "none";
-  if (footerLink) {
-    footerLink.onclick = () => {
       if (typeof chrome !== "undefined" && chrome.tabs) {
         chrome.tabs.create({ url: chromeUrl });
       }
@@ -1051,7 +1041,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     updatePrompt();
     updateTime();
     updateUI();
-    updateShortcuts();
     updateClickFx();
     setInterval(updateTime, 1e3);
     showOnboarding().catch((e) => console.error("onboarding failed:", e));
@@ -1068,9 +1057,6 @@ document.addEventListener("DOMContentLoaded", async () => {
           <button class="sidebar-more" id="sidebar-more"></button>
         </div>
         <div class="sidebar-content"></div>
-        <div class="sidebar-footer">
-          <button class="sidebar-footer-link"></button>
-        </div>
       </div>
     `;
     const sidebarTemp = document.createElement("div");

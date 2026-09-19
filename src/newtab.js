@@ -136,6 +136,13 @@ function detectBrowserLang() {
 function isFirefox() {
   return typeof browser !== "undefined" && typeof browser.runtime?.getBrowserInfo === "function";
 }
+// Keep <html lang> and the document title in sync with the UI language.
+// newtab.html ships lang="en"/"New Tab" as a pre-JS fallback only.
+function applyDocumentLang() {
+  const zh = getLang() === "zh";
+  document.documentElement.lang = zh ? "zh-CN" : "en";
+  document.title = zh ? "新标签页" : "New tab";
+}
 // "bookmarks" and "history" live in optional_permissions so that neither Chrome
 // nor Firefox asks for them at install time; they are requested the first time
 // the user opens the matching sidebar panel. A request that is already granted
@@ -1012,7 +1019,7 @@ function refreshMenu() {
 let menuVisible = false;
 document.addEventListener("DOMContentLoaded", async () => {
   migrateLegacySettings();
-  document.title = getLang() === "zh" ? "新标签页" : "New tab";
+  applyDocumentLang();
   applyTheme(getStored(STORAGE_KEYS.theme, ["auto", "light", "dark"], "auto"));
   const app = document.getElementById("app");
   if (app) {
@@ -1163,7 +1170,7 @@ document.addEventListener("DOMContentLoaded", async () => {
             break;
           case "set-lang":
             setStored(STORAGE_KEYS.lang, value);
-            document.title = value === "zh" ? "新标签页" : "New tab";
+            applyDocumentLang();
             updateUI();
             refreshMenu();
             break;

@@ -24,6 +24,9 @@
   /* Side of a settings tile (a square). Every other size in the panel is
      derived from it, so retuning the panel means editing this one value. */
   --settings-tile: 125px;
+  /* Gutter of the new tab page. .main sizes itself from the search box length
+     plus two of these, so the two numbers stay in step on their own. */
+  --page-pad: 2rem;
 }
 
 [data-theme="dark"] {
@@ -79,10 +82,23 @@ body.bg-stripes {
   background-image: repeating-linear-gradient(45deg, var(--stripe) 0 72px, transparent 72px 168px);
 }
 
+/* body is a centring flexbox, so #app is a flex item and would otherwise shrink
+   to its content's max-content size -- a width the search box can never exceed,
+   whatever --search-length says. Pin it to the viewport and centre .main inside
+   it instead, so the only thing that bounds the search box is its own length. */
+#app {
+  width: 100%;
+}
+
 .main {
   width: 100%;
-  max-width: 600px;
-  padding: 2rem;
+  /* Must be able to hold the widest the search box can get, plus this element's
+     own padding: with border-box that leaves exactly --search-length for the
+     content. A flat cap here (it used to be 600px, ie 536px of content) silently
+     clamped every length above it, which made the setting look inert. */
+  max-width: calc(var(--search-length, 500px) + var(--page-pad) * 2);
+  margin: 0 auto;
+  padding: var(--page-pad);
   text-align: center;
 }
 
@@ -133,7 +149,9 @@ body.bg-stripes {
 .search-box {
   position: relative;
   width: 100%;
-  /* Search box length; updateSearchStyle() writes the chosen value inline. */
+  /* Search box length. The variable lives on the root element (written by
+     updateSearchStyle()) so .main above can read the same number for its own
+     max-width; the fallback is what a bare newtab.html paints before JS runs. */
   max-width: var(--search-length, 500px);
   margin: 0 auto;
 }
@@ -204,9 +222,10 @@ body.bg-stripes {
 
 /* Search box styles. The two styles differ only in their frame: "modern" is a
    full box, "geek" drops the sides and keeps a heavier baseline. Corner radius
-   (modern only), border weight and width are inline custom properties written
-   by updateSearchStyle(); the values here are the fallbacks a bare newtab.html
-   paints before JS runs. A weight of 1px and a radius of 8px are the defaults. */
+   (modern only), border weight and box length are custom properties written on
+   the root element by updateSearchStyle(); the values here are the fallbacks a
+   bare newtab.html paints before JS runs. A weight of 1px and a radius of 8px
+   are the defaults. */
 
 /* Modern */
 .style-modern .search-input {

@@ -75,13 +75,14 @@ Shared helpers: `loadLicenseText()` reads the bundled `LICENSE` through `chrome.
 
 ## Search Box Styles
 
-Two styles, and the sizes are `localStorage` numbers applied as custom properties on `#search-form` by `updateSearchStyle()`:
+Two styles, and the sizes are `localStorage` numbers applied by `updateSearchStyle()` as custom properties **on `document.documentElement`** (not on the form — see below):
 
 | Style | Frame | Sizes |
 | --- | --- | --- |
 | `modern` | Full box with a blur backdrop | `--search-radius`, `--search-border`, `--search-length` |
 | `geek` | Baseline only (`border: none` + `border-bottom`) | `--search-border`, `--search-length` |
 
+- **The custom properties belong on the root element.** Custom properties inherit downwards only, and `.main` — an *ancestor* of the form — sizes its own `max-width` from `--search-length`, so the container can hold the box at the configured width. Writing them on `#search-form` (as this originally did) hides the value from `.main`, which then clamps the box to the container and makes the length setting look inert above that ceiling. `.main` uses `max-width: calc(var(--search-length, 500px) + var(--page-pad) * 2)` — with border-box that leaves exactly `--search-length` of content — and centres itself with `margin: 0 auto`. **Never put a flat `max-width` back on `.main`**: it was `600px` before, ie 536px of content. `#app` must keep `width: 100%`: the body is a centring flexbox, so left to itself the app div shrinks to its content's max-content width, which no `--search-length` can ever exceed.
 - `SEARCH_LIMITS` in `newtab.js` is the single source of truth for the allowed ranges and the defaults; `readLimit()` resolves anything missing, non-integer, or out of range to `spec.default`, and `isValidLimit()` is what the dialog validates against — the two share the rule so a rejected input and a stored value can never disagree.
 - **`0` means "keep the default" for every numeric search box setting**, and is always accepted: `isValidLimit()` returns true for `0` regardless of `min`, and `readLimit()` turns a stored `0` back into `spec.default`. So `0` and the default render identically — the tile reports the resolved value, and the dialog's field is prefilled with it too. There is no per-setting flag for this any more; it is the single rule. Only offer a `min` above 0 because it is the smallest *meaningful* value, not to forbid 0.
 - The CSS rules carry the same defaults as `var(--x, <default>)` fallbacks, purely so a bare `newtab.html` paints sensibly before JS runs. **Keep the two numbers in step** — `.workbuddy/test_settings.js` asserts that they match.

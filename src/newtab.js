@@ -288,12 +288,17 @@ function updateSearchStyle() {
   const style = getStored(STORAGE_KEYS.searchStyle, SEARCH_STYLES, "modern");
   form.classList.remove("style-modern", "style-geek");
   form.classList.add(`style-${style}`);
-  // Sizes travel to CSS as custom properties on the form (see newtab.css). The
-  // radius is written for both styles -- it is inert on the underline style,
-  // and writing it unconditionally keeps a style switch from losing the value.
-  form.style.setProperty("--search-radius", styleSize(STORAGE_KEYS.searchRadius, SEARCH_LIMITS.radius));
-  form.style.setProperty("--search-border", styleSize(STORAGE_KEYS.searchBorder, SEARCH_LIMITS.border));
-  form.style.setProperty("--search-length", styleSize(STORAGE_KEYS.searchLength, SEARCH_LIMITS.length));
+  // Sizes travel to CSS as custom properties (see newtab.css). They go on the
+  // ROOT element, not on the form: custom properties only inherit downwards, and
+  // `.main` -- an ancestor of the form -- sizes its own max-width from
+  // --search-length so the box can actually reach the configured width. A
+  // variable set on the form would be invisible there. The radius is written for
+  // both styles -- it is inert on the underline style, and writing it
+  // unconditionally keeps a style switch from losing the value.
+  const root = document.documentElement.style;
+  root.setProperty("--search-radius", styleSize(STORAGE_KEYS.searchRadius, SEARCH_LIMITS.radius));
+  root.setProperty("--search-border", styleSize(STORAGE_KEYS.searchBorder, SEARCH_LIMITS.border));
+  root.setProperty("--search-length", styleSize(STORAGE_KEYS.searchLength, SEARCH_LIMITS.length));
 }
 function escapeHTML(str) {
   const div = document.createElement("div");

@@ -4,7 +4,7 @@ Chrome MV3 extension that replaces the default new tab page. Designed for both C
 
 ## Project Overview
 
-A minimalist new tab page with a real-time clock, multi-engine search box, configurable background (blank / dot grid / stripes), auto/light/dark theme, right-click context menu, bookmarks + history sidebar, first-run onboarding, and an Easter egg screen.
+A minimalist new tab page with a real-time clock, multi-engine search box, configurable background (blank / dot grid / stripes), auto/light/dark theme, a right-click bottom-sheet settings panel, first-run onboarding, and an Easter egg screen.
 
 ## Tech Stack
 
@@ -20,7 +20,7 @@ A minimalist new tab page with a real-time clock, multi-engine search box, confi
 | --- | --- |
 | `manifest.json` | MV3 manifest. References `newtab.html` and the five icon files (16/48/96/128/256). |
 | `newtab.html` | Entry HTML; loads `./src/newtab.css` and `./src/newtab.js` as a module, and declares the favicon. |
-| `src/newtab.js` | All runtime logic — see module breakdown below. ~1230 lines. |
+| `src/newtab.js` | All runtime logic — see module breakdown below. ~810 lines. |
 | `src/newtab.css` | Styles. CSS variables for light/dark theme in `:root` and `[data-theme="dark"]`. |
 | `_locales/en/messages.json` | `extDescription` for the Chrome Web Store listing. |
 | `_locales/zh_CN/messages.json` | Same, Chinese translation. |
@@ -40,11 +40,10 @@ The script is a single ES module. Top-level `function` and `const` declarations 
 2. **Storage** — `t(key)`, `getStored(key, valid, fallback)`, `setStored(key, value)`, `migrateLegacySettings()` (one-shot migration of the legacy `showDots` key). All persistence is `localStorage`.
 3. **Detection** — `detectBrowserLang()` reads `navigator.language`; `isFirefox()` checks `browser.runtime?.getBrowserInfo`.
 4. **Theming** — `applyTheme()`, `updateUI()` (master rerender).
-5. **UI updates** — one `update*()` function per persisted option: `updatePrompt`, `updateTime`, `updateDots`, `updateClickFx`, `updateGo`, `updateSearchStyle`, `updatePlaceholder`, `updateShortcuts`. `updateUI()` calls them in the right order.
+5. **UI updates** — one `update*()` function per persisted option: `updatePrompt`, `updateTime`, `updateDots`, `updateClickFx`, `updateGo`, `updateSearchStyle`, `updatePlaceholder`. `updateUI()` calls them in the right order.
 6. **Search** — `isURL(text)`, `openURL(text)`, `search(query)`. Default engine uses `chrome.search.query()` (Chrome 87+ only — see Firefox caveat below).
-7. **Menu & onboarding** — `getMenuHTML()`, `refreshMenu()` build the right-click settings; `showOnboarding()` (async) runs the multi-step first-run flow and pulls the MIT text via `loadLicenseText()`.
-8. **Sidebar** — `showSidebar()` / `hideSidebar()` toggle a panel of `loadBookmarksSidebar()` (recurses via `renderBookmarkFolder`) and `loadHistory()`.
-9. **Easter egg** — `showEasterEgg()`, triggered by clicking the empty search box 7 times. Renders the hard-coded `EASTER_CONTENT` constant (`{{version}}` → `getRuntimeVersion()`), one line per `<div>`, one blank line per `<br>`. After measuring the rendered content it sets the animation duration to `(content height + viewport) / EASTER_CRAWL_SPEED` so the crawl holds 150 px/s and loops the moment the last line clears the screen.
+7. **Settings panel & onboarding** — `getSettingsContentHTML()` renders the active tab of the bottom-sheet settings panel (tabs: `appearance` / `searchBoxTab` / `shortcutsTab` / `advanced`; the Shortcuts tab is reserved and intentionally empty); `renderSettingsPanel()` / `openSettingsPanel()` / `closeSettingsPanel()` drive it. `showOnboarding()` (async) runs the multi-step first-run flow and pulls the MIT text via `loadLicenseText()`.
+8. **Easter egg** — `showEasterEgg()`, triggered by clicking the empty search box 7 times. Renders the hard-coded `EASTER_CONTENT` constant (`{{version}}` → `getRuntimeVersion()`), one line per `<div>`, one blank line per `<br>`. After measuring the rendered content it sets the animation duration to `(content height + viewport) / EASTER_CRAWL_SPEED` so the crawl holds 150 px/s and loops the moment the last line clears the screen.
 
 Shared helpers: `loadLicenseText()` reads the bundled `LICENSE` through `chrome.runtime.getURL()` and caches it; `getRuntimeVersion()` wraps `chrome.runtime.getManifest().version`.
 
@@ -63,33 +62,23 @@ Shared helpers: `loadLicenseText()` reads the bundled `LICENSE` through `chrome.
 | `searchEngine` | `browser` | `browser` / `google` / `duckduckgo` / `qwant` / `bing` / `baidu` |
 | `searchStyle` | `rounded` | `square` / `rounded` / `line` |
 | `backgroundStyle` | `blank` | `blank` / `dots` / `stripes` |
-| `showShortcuts` | `true` | Sidebar shortcuts |
 | `showClickFx` | `true` | Click ripple effect |
 
 > Legacy: versions before v2.1.0 wrote a boolean `showDots` key instead of `backgroundStyle`. `migrateLegacySettings()` runs once at startup, converts `showDots: "true"` into `backgroundStyle: "dots"`, then deletes the old key. New code must not read `showDots`.
 
 ## Permissions (`manifest.json`)
 
-Install-time `permissions`:
+The only declared permission is `search` — `chrome.search.query()` (Chrome only; Firefox ignores the API but recognises the permission). There are **no** `optional_permissions`: the former `bookmarks` / `history` optional permissions belonged to the removed shortcuts row + bookmarks/history sidebar and were dropped with them.
 
-- `search` — `chrome.search.query()` (Chrome only; Firefox ignores the API but recognises the permission).
+`tabs` is deliberately **not** declared. Nothing here calls `tabs.create()` anymore, and `tabs` would only be required to read `url` / `pendingUrl` / `title` / `favIconUrl` off `Tab` objects. Do not add it back.
 
-Runtime `optional_permissions`, requested on first use:
-
-- `bookmarks` — bookmarks sidebar.
-- `history` — recent history sidebar.
-
-`tabs` is deliberately **not** declared. The extension only calls `chrome.tabs.create()`, which needs no permission; `tabs` would only be required to read `url` / `pendingUrl` / `title` / `favIconUrl` off `Tab` objects, which nothing here does. Do not add it back.
-
-Manifest permissions cannot be split per browser — there is no `browser_specific_settings` override for `permissions`, so Chrome and Firefox read the same array. Keeping the sidebar permissions optional is what lets a single manifest avoid install-time prompts on both. `requestPermissions(perms)` in `src/newtab.js` wraps the two API shapes (`browser.*` promise / `chrome.*` callback) and degrades to "granted" when the API is absent, so the panel still opens with an explanatory message instead of failing silently. Callers must invoke it **synchronously from the event handler** and only chain `.then()` — Firefox drops the user gesture if an `await` happens first.
+Manifest permissions cannot be split per browser — there is no `browser_specific_settings` override for `permissions`, so Chrome and Firefox read the same array.
 
 ## Firefox Compatibility
 
 `browser_specific_settings.gecko.id = "dotstart@amexe2.github.io"` and `strict_min_version = "109.0"`. Code paths:
 
-- `isFirefox()` gates the UI differences (the shortcuts row, the "browser default" search engine, the sidebar's external links). When `chrome.search.query` is missing in Firefox, the `browser` engine silently fails — handle by either hiding it or falling back to `google` when `isFirefox()`.
-- The sidebar's "More" / footer links open `chrome://bookmarks` and `chrome://history`. All four shortcuts in `.shortcuts` are `chrome://` pages too. Firefox rejects **both** `chrome:` URLs and privileged `about:` URLs (`about:addons`, `about:config`, …) in `tabs.create`, and has no reachable equivalent — its library lives at `chrome://browser/content/places/places.xhtml`, which is still a `chrome:` URL. So on Firefox `updateShortcuts()` hides the whole shortcuts row (plus its menu toggle) and `showSidebar()` hides the two external-link affordances. Do **not** try to remap these to a Firefox URL; there is nowhere to point them. The consequence is that the bookmarks / history sidebar is unreachable on Firefox, so its optional-permission flow is Chrome-only in practice.
-- `chrome.*` works in Firefox via the polyfilled namespace, but not all APIs do. The `chrome` namespace there also *returns promises* for async calls (Firefox implements every async API with promises; callbacks are only accepted as a porting aid), so `await chrome.bookmarks.getTree()` is valid on both engines.
+- `isFirefox()` gates the "browser default" search engine option: it is hidden from the Search Box tab on Firefox because `chrome.search.query` is missing there and the `browser` engine would silently fail; the code falls back to `google` at search time. When a future feature needs `chrome://` pages or privileged `about:` URLs, remember that Firefox rejects **both** families in `tabs.create` and has no reachable equivalent — do not try to remap them.
 
 ## Loading the Extension
 

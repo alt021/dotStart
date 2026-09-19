@@ -793,15 +793,26 @@ document.addEventListener("DOMContentLoaded", async () => {
       // Clicking the backdrop (but not the dialog itself) dismisses it.
       if (!e.target.closest(".settings-dialog")) closeSettingsDialog();
     });
-    // The panel collapses on an outside click -- and on nothing else. The dialog
-    // is a sibling of the panel (both are children of <body>), so a click on a
-    // dialog option used to read as "outside the panel" and tore the panel down
-    // along with the dialog; exclude it explicitly.
+    // The panel collapses on an outside click -- and on nothing else.
+    //
+    // Where the click *started* has to be sampled during the capture phase,
+    // before any handler touches the DOM. Flipping a card calls
+    // renderSettingsPanel(), which rewrites .settings-content and thereby
+    // detaches the element that was clicked; by the time the bubble-phase
+    // handler below runs, that node is no longer a descendant of the panel, so
+    // contains() would answer "outside" and a plain toggle would tear the panel
+    // down. (Tab clicks escape this because the tab bar is never rewritten.)
+    //
+    // The dialog needs the same treatment for a different reason: it is a
+    // *sibling* of the panel (both are children of <body>), so a click on a
+    // dialog option is not "inside the panel" either.
+    let clickStartedInside = false;
     document.addEventListener("click", (e) => {
-      if (!settingsPanelVisible()) return;
-      if (settingsPanelEl.contains(e.target)) return;
-      if (settingsDialogEl && settingsDialogEl.contains(e.target)) return;
-      closeSettingsPanel();
+      clickStartedInside = settingsPanelEl.contains(e.target) ||
+        (!!settingsDialogEl && settingsDialogEl.contains(e.target));
+    }, true);
+    document.addEventListener("click", () => {
+      if (settingsPanelVisible() && !clickStartedInside) closeSettingsPanel();
     });
     // Escape dismisses the dialog only. The panel itself collapses on a
     // right-click or an outside click, never on a keystroke.

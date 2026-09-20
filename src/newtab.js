@@ -104,6 +104,7 @@ const I18N = {
     advanced: "Advanced",
     customCSS: "Custom CSS",
     customCSSHint: "Write CSS here. It overrides the built-in styles.",
+    customCSSWarning: "Edit with care — this can stop the extension from working.",
     customCSSNotSet: "Not set",
     customCSSEnabled: "Enabled",
     on: "On",
@@ -164,6 +165,7 @@ const I18N = {
     advanced: "高级",
     customCSS: "自定义 CSS",
     customCSSHint: "在此写入 CSS，将覆盖内置样式。",
+    customCSSWarning: "请谨慎修改 这可能会导致扩展无法工作",
     customCSSNotSet: "未配置",
     customCSSEnabled: "已启用",
     on: "已启用",
@@ -1071,6 +1073,9 @@ function openSettingsDialog(item) {
     // user input and would be parsed as HTML there. No error line: any CSS at
     // all is acceptable, and invalid rules are dropped by the parser, so there
     // is nothing to refuse. A blank field is how the user turns the feature off.
+    // The action row does carry a caveat, though: a sheet can hide or unmount the
+    // panel that would undo it, so the warning sits in the row rather than in an
+    // error line, which only ever reports a refused value.
     body.innerHTML = `
       <div class="settings-dialog-field">
         <textarea class="settings-dialog-input settings-dialog-textarea" spellcheck="false"
@@ -1078,6 +1083,7 @@ function openSettingsDialog(item) {
                   placeholder="${t("customCSSHint")}"></textarea>
       </div>
       <div class="settings-dialog-actions">
+        <span class="settings-dialog-warning">${t("customCSSWarning")}</span>
         <button class="settings-dialog-confirm" type="button">${t("confirm")}</button>
       </div>
     `;

@@ -21,6 +21,12 @@
   --stripe: rgba(0, 0, 0, 0.02);
   --blur-bg: rgba(255, 255, 255, 0.2);
   --blur-bg-focus: rgba(255, 255, 255, 0.3);
+  /* The palette's only hue. Restated in both dark blocks below, like every
+     other colour token -- a red that reads on white is muddy on black and vice
+     versa, so one shared literal cannot serve both. Exactly one rule uses it,
+     the custom CSS dialog's caveat. Errors elsewhere stay monochrome, where
+     `--fg` plus the invalid border already say "this was refused". */
+  --warn: #c0392b;
   /* Side of a settings tile (a square). Every other size in the panel is
      derived from it, so retuning the panel means editing this one value. */
   --settings-tile: 125px;
@@ -39,6 +45,7 @@
   --stripe: rgba(255, 255, 255, 0.07);
   --blur-bg: rgba(30, 30, 30, 0.2);
   --blur-bg-focus: rgba(40, 40, 40, 0.3);
+  --warn: #ff6b6b;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -52,6 +59,7 @@
     --stripe: rgba(255, 255, 255, 0.07);
     --blur-bg: rgba(30, 30, 30, 0.2);
     --blur-bg-focus: rgba(40, 40, 40, 0.3);
+    --warn: #ff6b6b;
   }
 }
 
@@ -711,6 +719,22 @@ body.bg-stripes {
   padding: 0.4rem 0 0;
   color: var(--fg);
   font-size: 0.75rem;
+}
+
+/* The custom CSS dialog's caveat, printed to the left of its confirm button.
+   No `margin-right: auto`: the row is `justify-content: flex-end`, so the note
+   stays against the button it is qualifying rather than being thrown to the far
+   end -- that far end is where the shortcut dialog puts Delete, which is a
+   different statement ("this row has a destructive action"), not a caveat.
+   Shrinkable and right-aligned so that when the text does wrap, its last line
+   still ends on the button. `min-width` is left at its initial `auto` on
+   purpose: the flex default would otherwise let the note fold down to one
+   character per line on a very narrow window. */
+.settings-dialog-warning {
+  color: var(--warn);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  text-align: right;
 }
 
 .settings-dialog-actions {

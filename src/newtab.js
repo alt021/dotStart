@@ -107,6 +107,10 @@ const I18N = {
     customCSSWarning: "Edit with care — this can stop the extension from working.",
     customCSSNotSet: "Not set",
     customCSSEnabled: "Enabled",
+    customCSSConfirmTitle: "Before you enable custom CSS",
+    customCSSConfirmNotice: "Custom CSS can stop this page from working. If it does, open the dotStart toolbar button and choose “Clear custom CSS”.",
+    customCSSConfirmCount: "Hold on — you can confirm in {n}s",
+    actionTitle: "Clear custom CSS",
     on: "On",
     off: "Off",
     addShortcut: "Add shortcut",
@@ -118,6 +122,7 @@ const I18N = {
     errorTitle: "Enter a title",
     errorUrl: "Enter a web address",
     errorWeight: "Weight must be a whole number from {min} to {max}",
+    back: "Back",
     delete: "Delete",
     close: "Close"
   },
@@ -168,6 +173,10 @@ const I18N = {
     customCSSWarning: "请谨慎修改 这可能会导致扩展无法工作",
     customCSSNotSet: "未配置",
     customCSSEnabled: "已启用",
+    customCSSConfirmTitle: "在启用自定义 CSS 之前",
+    customCSSConfirmNotice: "自定义 CSS 可能导致本页失效。若发生，请点开 dotStart 工具栏按钮并选择「清除自定义 CSS」。",
+    customCSSConfirmCount: "请稍候 — {n} 秒后可确认",
+    actionTitle: "清除自定义 CSS",
     on: "已启用",
     off: "已停用",
     addShortcut: "添加快捷方式",
@@ -179,6 +188,7 @@ const I18N = {
     errorTitle: "请输入标题",
     errorUrl: "请输入网址",
     errorWeight: "权重需为 {min}–{max} 之间的整数",
+    back: "返回",
     delete: "删除",
     close: "关闭"
   }
@@ -829,6 +839,16 @@ let settingsTab = "appearance";
 let settingsPanelEl = null;
 let settingsDialogEl = null;
 let settingsDialogItem = null;
+// The first switch-on of custom CSS goes through a confirmation stage whose
+// confirm button stays locked for this many seconds. One number, so tuning the
+// pause is a one-line change.
+const CSS_CONFIRM_SECONDS = 8;
+// That stage's state: the sheet the user is about to commit (null means the
+// dialog is not in the confirmation stage), the pending tick handles, and
+// whether the lock has elapsed.
+let cssConfirmPending = null;
+let cssConfirmTimers = [];
+let cssConfirmArmed = false;
 
 function engineOptions() {
   const options = [];
@@ -1152,16 +1172,125 @@ function confirmNumberSetting() {
 // field holds becomes the sheet, and clearing it is the documented way to turn
 // the feature back off. Read the field off `.settings-dialog-options`, like
 // every other dialog field -- see the note in confirmShortcutDialog().
-function confirmCustomCSSDialog() {
+//
+// Two of the three outcomes commit right here. Only the first switch-on does
+// not: that is the moment the page can go from working to broken, so it gets the
+// confirmation stage below. Editing an already-configured sheet and blanking the
+// field (which switches the feature off) both leave the page working, and
+// stopping to warn about them would be noise.
+function requestCustomCSSApply() {
   const item = settingsDialogItem;
   if (!item || item.kind !== "css" || !settingsDialogEl) return;
   const body = settingsDialogEl.querySelector(".settings-dialog-options");
   if (!body) return;
   const area = body.querySelector(".settings-dialog-textarea");
   if (!area) return;
-  applySetting(item.action, area.value);
+  const value = area.value;
+  if (value.trim() === "" || customCSSEnabled()) {
+    applySetting(item.action, value);
+    closeSettingsDialog();
+    renderSettingsPanel();
+    return;
+  }
+  // "First switch-on" is derived, not stored: customCSSEnabled() reports the
+  // same fact the tile does, so there is no extra key and no third state. The
+  // cost is that clearing the sheet and enabling again warns a second time --
+  // which is the right side to err on, since that user has just been bitten.
+  cssConfirmPending = value;
+  openCSSConfirmStage();
+}
+// The confirmation stage replaces the dialog's *contents*, keeping the overlay
+// element and with it the geometry every dialog shares (max-width, radius,
+// z-index). It does not go through openSettingsDialog(): that function is driven
+// by a settings item's `labelKey`/`options`, which this stage has none of, and
+// adding a fifth kind to it would mean editing a path all the other dialogs run
+// through.
+//
+// settingsDialogItem is deliberately left pointing at the css item for the whole
+// stage; routing keys off cssConfirmPending instead. Rewriting `kind` to mark the
+// stage would break the invariant that this item is a css item -- including the
+// check at the top of requestCustomCSSApply() and the one in the tests.
+function openCSSConfirmStage() {
+  if (!settingsDialogEl) return;
+  const body = settingsDialogEl.querySelector(".settings-dialog-options");
+  if (!body) return;
+  const titleEl = settingsDialogEl.querySelector(".settings-dialog-title");
+  const dialog = settingsDialogEl.querySelector(".settings-dialog");
+  if (titleEl) titleEl.textContent = t("customCSSConfirmTitle");
+  if (dialog) dialog.classList.add("settings-dialog-css-confirm");
+  body.innerHTML = `
+    <p class="settings-dialog-notice">${t("customCSSConfirmNotice")}</p>
+    <p class="settings-dialog-count">${fmt(t("customCSSConfirmCount"), { n: CSS_CONFIRM_SECONDS })}</p>
+    <div class="settings-dialog-actions">
+      <button class="settings-dialog-back" type="button">${t("back")}</button>
+      <button class="settings-dialog-confirm" type="button" disabled>${t("confirm")}</button>
+    </div>
+  `;
+  settingsDialogEl.classList.add("visible");
+  startCSSConfirmCountdown();
+}
+// One tick per second, all scheduled up front rather than one interval that
+// reschedules itself: every handle then lands in cssConfirmTimers, so the single
+// cleanup below cannot miss a repeat.
+function startCSSConfirmCountdown() {
+  cssConfirmArmed = false;
+  settingsDialogEl.classList.add("css-confirm-waiting");
+  const countEl = settingsDialogEl.querySelector(".settings-dialog-count");
+  const btn = settingsDialogEl.querySelector(".settings-dialog-confirm");
+  for (let sec = 1; sec <= CSS_CONFIRM_SECONDS; sec++) {
+    cssConfirmTimers.push(setTimeout(() => {
+      if (sec < CSS_CONFIRM_SECONDS) {
+        if (countEl) countEl.textContent = fmt(t("customCSSConfirmCount"), { n: CSS_CONFIRM_SECONDS - sec });
+        return;
+      }
+      cssConfirmArmed = true;
+      settingsDialogEl.classList.remove("css-confirm-waiting");
+      if (btn) btn.disabled = false;
+      if (countEl) countEl.textContent = "";
+      cssConfirmTimers = [];
+    }, sec * 1000));
+  }
+}
+// Clears the lock and its ticks and restores the dialog's class list. This is
+// the only place that touches cssConfirmTimers, so every exit -- confirm, back,
+// the close button, Escape, a backdrop click, a storage event -- is covered by
+// whoever calls it. It does not decide what becomes of cssConfirmPending.
+function stopCSSConfirmCountdown() {
+  cssConfirmTimers.forEach((id) => clearTimeout(id));
+  cssConfirmTimers = [];
+  cssConfirmArmed = false;
+  if (!settingsDialogEl) return;
+  settingsDialogEl.classList.remove("css-confirm-waiting");
+  const dialog = settingsDialogEl.querySelector(".settings-dialog");
+  if (dialog) dialog.classList.remove("settings-dialog-css-confirm");
+}
+// The second confirm, and the only route by which the pending sheet reaches
+// storage. The `armed` test is not redundant with the button's `disabled`
+// attribute: that only stops a pointer, so without this the eight seconds would
+// be advisory rather than enforced.
+function confirmCSSWarning() {
+  if (cssConfirmPending === null || !settingsDialogItem || !settingsDialogEl) return;
+  if (!cssConfirmArmed) return;
+  applySetting(settingsDialogItem.action, cssConfirmPending);
   closeSettingsDialog();
   renderSettingsPanel();
+}
+// "Back" returns to the editing field with the text intact. Without it the only
+// way out of the stage would be to throw the sheet away, which would make typing
+// a long stylesheet riskier than it was before this stage existed.
+function backToCSSStage() {
+  const pending = cssConfirmPending;
+  const item = settingsDialogItem;
+  stopCSSConfirmCountdown();
+  cssConfirmPending = null;
+  if (!item) {
+    closeSettingsDialog();
+    return;
+  }
+  openSettingsDialog(item);
+  const body = settingsDialogEl && settingsDialogEl.querySelector(".settings-dialog-options");
+  const area = body && body.querySelector(".settings-dialog-textarea");
+  if (area) area.value = pending == null ? "" : pending;
 }
 // Reads the shortcut dialog's three fields and either saves or reports the first
 // problem. A blank weight means the default; a blank title or an unusable url is
@@ -1209,7 +1338,13 @@ function confirmDeleteShortcut() {
   renderSettingsPanel();
   updateShortcuts();
 }
+// The single exit for every way the dialog can be dismissed -- the close button,
+// Escape, a backdrop click, a finished confirm, "Back" mid-stage. Keeping it the
+// only exit is what makes "the countdown is always stopped, and a pending sheet
+// is always dropped" true without repeating that cleanup at five call sites.
 function closeSettingsDialog() {
+  stopCSSConfirmCountdown();
+  cssConfirmPending = null;
   if (settingsDialogEl) settingsDialogEl.classList.remove("visible");
   settingsDialogItem = null;
 }
@@ -1408,10 +1543,21 @@ document.addEventListener("DOMContentLoaded", async () => {
         closeSettingsDialog();
         return;
       }
+      if (e.target.closest(".settings-dialog-back")) {
+        backToCSSStage();
+        return;
+      }
       if (e.target.closest(".settings-dialog-confirm")) {
+        // The confirmation stage is recognised by its pending sheet rather than
+        // by a kind -- settingsDialogItem stays the css item all the way through
+        // -- so this branch order is the only place the two stages differ.
+        if (cssConfirmPending !== null) {
+          confirmCSSWarning();
+          return;
+        }
         const kind = settingsDialogItem && settingsDialogItem.kind;
         if (kind === "shortcut") confirmShortcutDialog();
-        else if (kind === "css") confirmCustomCSSDialog();
+        else if (kind === "css") requestCustomCSSApply();
         else confirmNumberSetting();
         return;
       }
@@ -1467,6 +1613,30 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && settingsDialogVisible()) closeSettingsDialog();
     });
+    // The toolbar popup runs on this same extension origin, so the sheet it
+    // clears is this page's sheet. localStorage changes reach other same-origin
+    // documents as a `storage` event, which is how a page a bad sheet has already
+    // wrecked recovers the moment the user rescues it from the toolbar -- no
+    // reload, and no permission for the popup to reach in here. `key === null`
+    // covers localStorage.clear().
+    //
+    // An in-flight confirmation is dropped rather than committed: the user has
+    // just asked for the sheet to go away, and letting a pending value land
+    // afterwards would re-break the page they just rescued.
+    window.addEventListener("storage", (e) => {
+      if (e.key !== STORAGE_KEYS.customCSS && e.key !== null) return;
+      if (cssConfirmPending !== null) closeSettingsDialog();
+      updateCustomCSS();
+      renderSettingsPanel();
+    });
+    // The toolbar button's tooltip. The manifest's __MSG_actionTitle__ resolves
+    // against the browser's UI locale, which need not be the language chosen in
+    // this page, so state it once in the app's own language; the manifest value
+    // remains the fallback for the window before a new tab has ever loaded.
+    if (typeof chrome !== "undefined" && chrome.action &&
+        typeof chrome.action.setTitle === "function") {
+      chrome.action.setTitle({ title: t("actionTitle") });
+    }
     const form = document.getElementById("search-form");
     const input = document.getElementById("search-input");
     const placeholder = document.querySelector(".search-placeholder");

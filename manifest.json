@@ -7,6 +7,10 @@
   "chrome_url_overrides": {
     "newtab": "newtab.html"
   },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "__MSG_actionTitle__"
+  },
   "permissions": ["search"],
   "icons": {
     "16": "icon-16.png",

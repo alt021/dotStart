@@ -685,6 +685,32 @@ body.bg-stripes {
   line-height: 1.5;
 }
 
+/* The custom CSS confirmation stage. It replaces the *contents* of the same
+   dialog, so the width is the only thing it has to restate -- radius, border and
+   max-width all come from .settings-dialog. Narrower than the field stage on
+   purpose: there is no editor in it. */
+.settings-dialog-css-confirm {
+  min-width: min(520px, 70vw);
+}
+
+/* The stage's two paragraphs. They do not reuse .settings-dialog-field, which is
+   built to hold one full-width control. */
+.settings-dialog-notice {
+  padding: 0.9rem 1.25rem 0;
+  font-size: 0.85rem;
+  line-height: 1.55;
+}
+
+/* The countdown. Deliberately not an aria-live region: announcing every second
+   is noise for a screen reader, and the sentence above already explains the
+   wait. The part that matters -- the button becoming usable -- is announced by
+   the button itself once focus reaches it. */
+.settings-dialog-count {
+  padding: 0.35rem 1.25rem 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
 .settings-dialog-field {
   padding: 0.9rem 1.25rem 0;
 }
@@ -745,10 +771,14 @@ body.bg-stripes {
   padding: 0.25rem 1.25rem 1rem;
 }
 
-/* Destructive action, pushed to the far end of the row so it cannot be hit on
-   the way to the confirm button. Outlined rather than filled: it is not the
-   default action. */
-.settings-dialog-delete {
+/* The far end of the action row: the action that is *not* the point of the
+   dialog, so it cannot be hit on the way to the confirm button. Outlined rather
+   than filled, for the same reason. Two things share this rule -- the shortcut
+   dialog's Delete and the custom CSS stage's Back -- and that is deliberate:
+   they occupy the same slot, and weighting them differently would imply a
+   difference in consequence that is not there. */
+.settings-dialog-delete,
+.settings-dialog-back {
   margin-right: auto;
   padding: 0.5rem 1.3rem;
   background: none;
@@ -761,7 +791,8 @@ body.bg-stripes {
   transition: color 0.15s, border-color 0.15s;
 }
 
-.settings-dialog-delete:hover {
+.settings-dialog-delete:hover,
+.settings-dialog-back:hover {
   color: var(--fg);
   border-color: var(--fg);
 }
@@ -780,6 +811,15 @@ body.bg-stripes {
 
 .settings-dialog-confirm:hover {
   opacity: 0.75;
+}
+
+/* Last rule for this button on purpose: it has the same specificity as the
+   :hover rule above, so the later one wins and a locked button cannot light up
+   while it waits. A countdown that only *behaves* as a lock is not enough -- it
+   has to look locked too, or the eight seconds read as a broken button. */
+.settings-dialog-confirm:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 /* Click Effects */

@@ -41,6 +41,8 @@
 | MIT 许可证全文 | `LICENSE` | `newtab.js` 的 `MIT_LICENSE` 常量（约 1 KB） | 改许可证需同步两处 |
 | 发行日志 / 仓库地址 | `guide.md` | `newtab.js` 彩蛋文本 | 已出现偏差：guide 用 `<扩展程序版本号>` 占位，JS 里写死 2.1.0 |
 | 引导页文案 | `ONBOARDING_I18N`（JS 内） | 无外部来源 | 翻译只能改代码 |
+| 主题色 token（`--bg` / `--fg` / `--border` / `--muted`） | `src/newtab.css`（每个主题块各一份） | `src/popup.css` 重述 4 个 token × 3 个主题块 | 工具条面板的底色/字色与页面漂移。**已缓解**：`test_settings.js` 断言 popup.css 出现的每个色值都逐字存在于 `newtab.css`，改错一边即 FAIL |
+| 工具条按钮文案 | `_locales/en\|zh_CN/messages.json` 的 `actionTitle` + `src/newtab.js` 的 `I18N.actionTitle` | `src/popup.js` 的 `POPUP_I18N.*.clear` | 三处必须同名（对话框里的告诫文案正是引用这个串）。**已缓解**：`test_settings.js` 断言三者相等，且 popup 的存储键字面量必须等于 `STORAGE_KEYS.customCSS` |
 
 **建议**：把彩蛋里的版本、仓库、日志改为从 `chrome.runtime.getManifest().version` 与单一常量读取；MIT 全文改为运行时 `fetch()` 同目录 `LICENSE`（扩展页面允许同源读取）或直接保留一份、删除另一份。
 
@@ -101,10 +103,11 @@
 | 2026-09-11 | 新增 `house-regular-full.svg` 作为主题感知 favicon | `c4e4f34` |
 | 2026-09-11 | 权限收敛：删掉未使用的 `tabs`；`bookmarks` / `history` 转入 `optional_permissions`，首次打开侧边栏时申请 | `489a5b9` |
 | 2026-09-11 | Firefox 快捷入口定案：整行（含菜单开关）与侧边栏外部链接在 Firefox 下不提供 | `c03e2c5` |
+| 2026-09-20 | 自定义 CSS 的首次启用加 8 秒确认阶段；新增扩展工具栏按钮弹窗（`popup.html` + `src/popup.js` + `src/popup.css`）一键清除；已打开的页面通过 `storage` 事件实时恢复（零新增权限） | 本轮 |
 
 ### 仍未解决
 
-- **`newtab.js` 仍是单文件约 1230 行**（P3）。五套独立 UI 混居一处，改动易互相干扰。建议后续拆为 `i18n` / `search` / `menu` / `sidebar` / `onboarding` / `easter-egg` 模块。
+- **`newtab.js` 仍是单文件约 1730 行**（P3）。多套独立 UI 混居一处，改动易互相干扰。建议后续拆为 `i18n` / `search` / `menu` / `settings-dialog` / `onboarding` / `easter-egg` 模块。
 - **Chrome 新标签页可能不显示 favicon**：Chrome 有意在 NTP 不渲染 favicon，`house-regular-full.svg` 大概率只在 Firefox 或直接打开 `newtab.html` 时可见。如需在 Chrome 也更换视觉标识，唯一杠杆是重新生成 `manifest.json` 的 `icons`（PNG，无法随主题变色）。**尚未决定**。
 
 ---

@@ -4,5 +4,8 @@
   },
   "extDescription": {
     "message": "Minimal new tab page with auto dark mode, time display, and search box"
+  },
+  "actionTitle": {
+    "message": "Clear custom CSS"
   }
 }

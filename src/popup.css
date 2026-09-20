@@ -1,0 +1,73 @@
+/* The toolbar popup's own stylesheet, deliberately NOT newtab.css. That sheet's
+   `body` rule is `min-height: 100vh` plus flex centring -- right for a full page,
+   wrong for a popup, where it would stretch the panel to the browser's maximum
+   popup height and centre one button in the middle of it.
+
+   The colour tokens below are restated rather than shared, and must stay
+   byte-identical to their counterparts in newtab.css; test_settings.js asserts
+   that they are, so drift shows up as a failing test instead of as a toolbar
+   panel that is subtly the wrong shade. Only the tokens this panel reads are
+   copied -- the theme's other tokens would be dead code here. */
+:root {
+  --bg: #fff;
+  --fg: #000;
+  --border: #ccc;
+  --muted: #666;
+}
+
+[data-theme="dark"] {
+  --bg: #000;
+  --fg: #fff;
+  --border: #333;
+  --muted: #888;
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-theme="auto"] {
+    --bg: #000;
+    --fg: #fff;
+    --border: #333;
+    --muted: #888;
+  }
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 200px;
+  padding: 0.9rem;
+  font-family: 'Latin Mono', 'Sarasa UI SC', 'Sarasa UI TC', 'Sarasa UI J',
+    'Sarasa UI K', 'Roboto', 'PingFang SC',
+    'Microsoft YaHei', 'WenQuanYi Micro Hei', 'Noto Sans SC', sans-serif;
+  background-color: var(--bg);
+  color: var(--fg);
+}
+
+/* No min-height anywhere: the panel is sized by its content. */
+#clear-btn {
+  width: 100%;
+  padding: 0.5rem 1rem;
+  background: var(--fg);
+  border: 1px solid var(--fg);
+  border-radius: 0;
+  color: var(--bg);
+  font-family: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+#clear-btn:hover {
+  opacity: 0.75;
+}
+
+#popup-result {
+  margin-top: 0.6rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}

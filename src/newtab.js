@@ -575,8 +575,8 @@ const ONBOARDING_I18N = {
       `<div class="onboarding-col">
          <div class="onboarding-title">使用方法</div>
          <div class="onboarding-subtitle">点按右键打开设置面板</div>
-         <img class="onboarding-img onboarding-img-light" src="scrshot-light.png" alt="右键菜单截图">
-         <img class="onboarding-img onboarding-img-dark" src="scrshot-dark.png" alt="右键菜单截图">
+         <img class="onboarding-img onboarding-img-light" src="scrshot-light.png" alt="设置面板截图">
+         <img class="onboarding-img onboarding-img-dark" src="scrshot-dark.png" alt="设置面板截图">
        </div>`,
       `<div class="onboarding-center">
          <div class="onboarding-emoji">\u{1F389}</div>
@@ -609,8 +609,8 @@ const ONBOARDING_I18N = {
       `<div class="onboarding-col">
          <div class="onboarding-title">How to Use</div>
          <div class="onboarding-subtitle">Right-click to open the settings panel</div>
-         <img class="onboarding-img onboarding-img-light" src="scrshot-light.png" alt="Context menu screenshot">
-         <img class="onboarding-img onboarding-img-dark" src="scrshot-dark.png" alt="Context menu screenshot">
+         <img class="onboarding-img onboarding-img-light" src="scrshot-light.png" alt="Settings panel screenshot">
+         <img class="onboarding-img onboarding-img-dark" src="scrshot-dark.png" alt="Settings panel screenshot">
        </div>`,
       `<div class="onboarding-center">
          <div class="onboarding-emoji">\u{1F389}</div>

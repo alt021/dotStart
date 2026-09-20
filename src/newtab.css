@@ -867,7 +867,18 @@ body.bg-stripes {
 }
 
 .onboarding-img {
-  width: 100%;
+  /* Step 3's preview. The two theme variants are shot separately and their
+     crops do not share an aspect ratio, so the box must not be sized by width:
+     a stretched full-width box frames a 416px slot and leaves the narrower
+     shot floating inside it, with empty strips against the border. The
+     `align-self` opts out of the column's default stretch and `width: auto`
+     gives each shot its own ratio back, so the border hugs the picture. The
+     flex pair stays -- it is what sets the box height to whatever the title
+     and subtitle leave, and that shared height is what keeps a theme flip from
+     reflowing the panel. */
+  align-self: center;
+  width: auto;
+  max-width: 100%;
   border: 1px solid var(--border);
   flex: 1;
   min-height: 0;

@@ -685,26 +685,27 @@ body.bg-stripes {
   line-height: 1.5;
 }
 
-/* The custom CSS confirmation stage. It replaces the *contents* of the same
-   dialog, so the width is the only thing it has to restate -- radius, border and
-   max-width all come from .settings-dialog. Narrower than the field stage on
-   purpose: there is no editor in it. */
+/* The custom CSS gate: the stage that stands between the tile and the editor on
+   a first switch-on. It replaces the *contents* of the same dialog, so the width
+   is the only thing it has to restate -- radius, border and max-width all come
+   from .settings-dialog. Narrower than the editor stage on purpose: there is no
+   editor in it. */
 .settings-dialog-css-confirm {
   min-width: min(520px, 70vw);
 }
 
-/* The stage's body paragraphs. None of them reuses .settings-dialog-field, which
-   is built to hold one full-width control. */
+/* The gate's two paragraphs. Neither reuses .settings-dialog-field, which is
+   built to hold one full-width control. */
 .settings-dialog-notice {
   padding: 0.9rem 1.25rem 0;
   font-size: 0.85rem;
   line-height: 1.55;
 }
 
-/* The way out gets its own paragraph and the heavier weight, because it is the
-   one line here that has to survive a skim. Emphasis is weight rather than
-   colour on purpose: var(--warn) is read by exactly one rule -- the red line in
-   the editor stage -- and a second reader would both break that assertion and
+/* The second paragraph states the way out, and it is the one line here that has
+   to survive a skim, so it gets the heavier weight. Emphasis is weight rather
+   than colour on purpose: var(--warn) is read by exactly one rule -- the red line
+   in the editor stage -- and a second reader would both break that assertion and
    start a second warning colour the panel's monochrome look has no room for. */
 .settings-dialog-escape {
   padding: 0.6rem 1.25rem 0;
@@ -713,16 +714,14 @@ body.bg-stripes {
   font-weight: 500;
 }
 
-/* Tertiary lines under the paragraph block: the countdown and the practical
-   snag with the escape route. The countdown is deliberately not an aria-live
-   region -- announcing every second is noise for a screen reader, and the
-   paragraph above already explains the wait. The part that matters, the button
-   becoming usable, is announced by the button itself once focus reaches it. */
-.settings-dialog-count,
-.settings-dialog-hint {
-  padding: 0.35rem 1.25rem 0;
-  font-size: 0.75rem;
-  color: var(--muted);
+/* The gate's confirm button carries the countdown in its own label, so the digits
+   must not make it twitch as they change: tabular figures give every digit the
+   same advance width. The label does lose its "(n)" when the wait ends, which is
+   one deliberate width change at the very moment the button becomes pressable --
+   the same moment it stops being a waiting button and becomes the ordinary
+   `confirm` button every other dialog has. */
+.settings-dialog-css-confirm .settings-dialog-confirm {
+  font-variant-numeric: tabular-nums;
 }
 
 .settings-dialog-field {
@@ -787,12 +786,11 @@ body.bg-stripes {
 
 /* The far end of the action row: the action that is *not* the point of the
    dialog, so it cannot be hit on the way to the confirm button. Outlined rather
-   than filled, for the same reason. Two things share this rule -- the shortcut
-   dialog's Delete and the custom CSS stage's Back -- and that is deliberate:
-   they occupy the same slot, and weighting them differently would imply a
-   difference in consequence that is not there. */
-.settings-dialog-delete,
-.settings-dialog-back {
+   than filled, for the same reason. Only the shortcut dialog has one now: the
+   custom CSS gate's way out is the dialog's own close button, the same one the
+   editor stage leaves it to, because the gate stands *before* the editor rather
+   than after it and so has no earlier stage to return to. */
+.settings-dialog-delete {
   margin-right: auto;
   padding: 0.5rem 1.3rem;
   background: none;
@@ -805,8 +803,7 @@ body.bg-stripes {
   transition: color 0.15s, border-color 0.15s;
 }
 
-.settings-dialog-delete:hover,
-.settings-dialog-back:hover {
+.settings-dialog-delete:hover {
   color: var(--fg);
   border-color: var(--fg);
 }
@@ -830,7 +827,7 @@ body.bg-stripes {
 /* Last rule for this button on purpose: it has the same specificity as the
    :hover rule above, so the later one wins and a locked button cannot light up
    while it waits. A countdown that only *behaves* as a lock is not enough -- it
-   has to look locked too, or the eight seconds read as a broken button. */
+   has to look locked too, or the gate's wait reads as a broken button. */
 .settings-dialog-confirm:disabled {
   opacity: 0.35;
   cursor: not-allowed;

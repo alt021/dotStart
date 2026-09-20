@@ -108,10 +108,9 @@ const I18N = {
     customCSSNotSet: "Not set",
     customCSSEnabled: "Enabled",
     customCSSConfirmTitle: "Before you enable custom CSS",
-    customCSSConfirmNotice: "Custom CSS can restyle anything on this page, the settings panel included. If it leaves the page unworkable, nothing here can be clicked any more.",
-    customCSSConfirmEscape: "The way out sits outside the page: open the dotStart toolbar button and choose “Clear custom CSS”. That button keeps working when the page is blank.",
-    customCSSConfirmPinHint: "Can't see it? Pin dotStart from your browser's extensions menu first.",
-    customCSSConfirmCount: "Hold on — you can confirm in {n}s",
+    customCSSConfirmNotice: "This feature is for advanced users who want to restyle this page by hand. If you do not know what it does, please do not change it.",
+    customCSSConfirmEscape: "You can clear custom CSS from the button in the extension toolbar.",
+    customCSSConfirmWait: "OK ({n})",
     actionTitle: "Clear custom CSS",
     on: "On",
     off: "Off",
@@ -124,7 +123,6 @@ const I18N = {
     errorTitle: "Enter a title",
     errorUrl: "Enter a web address",
     errorWeight: "Weight must be a whole number from {min} to {max}",
-    back: "Back",
     delete: "Delete",
     close: "Close"
   },
@@ -176,10 +174,9 @@ const I18N = {
     customCSSNotSet: "未配置",
     customCSSEnabled: "已启用",
     customCSSConfirmTitle: "在启用自定义 CSS 之前",
-    customCSSConfirmNotice: "自定义 CSS 能改写本页上的任何东西，设置面板自己也算在内。一旦它让本页失效，你在这里就点不动任何东西了。",
-    customCSSConfirmEscape: "出口在本页之外：点开 dotStart 工具栏按钮，选择「清除自定义 CSS」。页面全白了它也照样能用。",
-    customCSSConfirmPinHint: "工具栏上看不到它？先在浏览器的扩展菜单里把 dotStart 固定住。",
-    customCSSConfirmCount: "请稍候 — {n} 秒后可确认",
+    customCSSConfirmNotice: "该功能仅供高级用户自定义，如果不知道其功能，请勿修改。",
+    customCSSConfirmEscape: "您可通过扩展工具栏中的按钮清除自定义 CSS 配置。",
+    customCSSConfirmWait: "确定({n})",
     actionTitle: "清除自定义 CSS",
     on: "已启用",
     off: "已停用",
@@ -192,7 +189,6 @@ const I18N = {
     errorTitle: "请输入标题",
     errorUrl: "请输入网址",
     errorWeight: "权重需为 {min}–{max} 之间的整数",
-    back: "返回",
     delete: "删除",
     close: "关闭"
   }
@@ -843,16 +839,18 @@ let settingsTab = "appearance";
 let settingsPanelEl = null;
 let settingsDialogEl = null;
 let settingsDialogItem = null;
-// The first switch-on of custom CSS goes through a confirmation stage whose
-// confirm button stays locked for this many seconds. One number, so tuning the
-// pause is a one-line change.
-const CSS_CONFIRM_SECONDS = 8;
-// That stage's state: the sheet the user is about to commit (null means the
-// dialog is not in the confirmation stage), the pending tick handles, and
-// whether the lock has elapsed.
-let cssConfirmPending = null;
-let cssConfirmTimers = [];
-let cssConfirmArmed = false;
+// The custom CSS dialog's first switch-on opens on a gate rather than on its
+// editor, and the gate's confirm button stays locked for this many seconds. One
+// number, so tuning the pause is a one-line change.
+const CSS_GATE_SECONDS = 8;
+// The gate's state: whether it is the stage currently on screen, whether its
+// wait has elapsed, and whether this document has already cleared it once. The
+// last one is deliberately not stored: it only spares a user who has just read
+// the warning from waiting it out again after clicking the tile a second time.
+let cssGateOpen = false;
+let cssGateArmed = false;
+let cssGateTimers = [];
+let cssGatePassed = false;
 
 function engineOptions() {
   const options = [];
@@ -1037,9 +1035,22 @@ function openSettingsDialog(item) {
   const isNumber = item.kind === "number";
   const isShortcut = item.kind === "shortcut";
   const isCSS = item.kind === "css";
+  // The one path that can take a working page and break it opens on a gate: the
+  // warning is read *before* the editor, never after a save. "First switch-on" is
+  // derived from the stored sheet -- customCSSEnabled() reports the same fact the
+  // tile does -- so this costs no storage key and no third state; cssGatePassed
+  // is session-only and just spares a second wait inside one document.
+  const isGate = isCSS && !customCSSEnabled() && !cssGatePassed;
+  // Derived together on every open, so no other function has to undo them: the
+  // gate is a css dialog of its own width, and never both at once.
   dialog.classList.toggle("settings-dialog-number", isNumber);
   dialog.classList.toggle("settings-dialog-shortcut", isShortcut);
-  dialog.classList.toggle("settings-dialog-css", isCSS);
+  dialog.classList.toggle("settings-dialog-css", isCSS && !isGate);
+  dialog.classList.toggle("settings-dialog-css-confirm", isGate);
+  if (isGate) {
+    openCSSGateStage();
+    return;
+  }
   if (isShortcut) {
     const isNew = item.index < 0;
     titleEl.textContent = t(isNew ? "addShortcut" : "editShortcut");
@@ -1172,135 +1183,119 @@ function confirmNumberSetting() {
   closeSettingsDialog();
   renderSettingsPanel();
 }
-// Reads the custom CSS dialog's textarea. Nothing to validate: whatever the
-// field holds becomes the sheet, and clearing it is the documented way to turn
-// the feature back off. Read the field off `.settings-dialog-options`, like
-// every other dialog field -- see the note in confirmShortcutDialog().
+// Reads the custom CSS dialog's textarea. Nothing to validate: whatever the field
+// holds becomes the sheet, and clearing it is the documented way to turn the
+// feature back off. Read the field off `.settings-dialog-options`, like every
+// other dialog field -- see the note in confirmShortcutDialog().
 //
-// Two of the three outcomes commit right here. Only the first switch-on does
-// not: that is the moment the page can go from working to broken, so it gets the
-// confirmation stage below. Editing an already-configured sheet and blanking the
-// field (which switches the feature off) both leave the page working, and
-// stopping to warn about them would be noise.
-function requestCustomCSSApply() {
+// Nothing stands between this and storage any more, and that is deliberate: the
+// warning belongs at the moment the feature is switched on, which is now before
+// the editor opens (see openSettingsDialog). A save is the wrong moment for it.
+// By then the user has read the warning, waited out its lock and typed a sheet,
+// and stopping them again would tax the two commits that cannot make a working
+// page worse: rewriting a sheet that is already live, and blanking the field,
+// which is how the feature is switched off.
+function confirmCustomCSSDialog() {
   const item = settingsDialogItem;
   if (!item || item.kind !== "css" || !settingsDialogEl) return;
   const body = settingsDialogEl.querySelector(".settings-dialog-options");
   if (!body) return;
   const area = body.querySelector(".settings-dialog-textarea");
   if (!area) return;
-  const value = area.value;
-  if (value.trim() === "" || customCSSEnabled()) {
-    applySetting(item.action, value);
-    closeSettingsDialog();
-    renderSettingsPanel();
-    return;
-  }
-  // "First switch-on" is derived, not stored: customCSSEnabled() reports the
-  // same fact the tile does, so there is no extra key and no third state. The
-  // cost is that clearing the sheet and enabling again warns a second time --
-  // which is the right side to err on, since that user has just been bitten.
-  cssConfirmPending = value;
-  openCSSConfirmStage();
+  applySetting(item.action, area.value);
+  closeSettingsDialog();
+  renderSettingsPanel();
 }
-// The confirmation stage replaces the dialog's *contents*, keeping the overlay
-// element and with it the geometry every dialog shares (max-width, radius,
-// z-index). It does not go through openSettingsDialog(): that function is driven
-// by a settings item's `labelKey`/`options`, which this stage has none of, and
-// adding a fifth kind to it would mean editing a path all the other dialogs run
-// through.
+// The label the gate's confirm button carries while it counts down. Built from
+// the same `confirm` string as every other dialog's button, so the waiting
+// button already says the verb it will say once it is usable.
+function cssGateLabel(seconds) {
+  return fmt(t("customCSSConfirmWait"), { n: seconds });
+}
+// The gate itself: the dialog's *contents*, not a second dialog. It keeps the
+// overlay element and with it the geometry every dialog shares (max-width,
+// radius, z-index), and it is filled in here rather than by openSettingsDialog()
+// because that function is driven by a settings item's `labelKey`/`options`,
+// which this stage has none of.
 //
-// settingsDialogItem is deliberately left pointing at the css item for the whole
-// stage; routing keys off cssConfirmPending instead. Rewriting `kind` to mark the
-// stage would break the invariant that this item is a css item -- including the
-// check at the top of requestCustomCSSApply() and the one in the tests.
-function openCSSConfirmStage() {
+// Two paragraphs and one button. The first says what the feature is for; the
+// second is the only place in the product that ever teaches the toolbar escape,
+// so it gets its own paragraph and the heavier weight rather than a clause
+// tacked onto the warning. The action row carries no dismiss button: the
+// dialog's own close button is the way out, exactly as in the editor stage.
+function openCSSGateStage() {
   if (!settingsDialogEl) return;
   const body = settingsDialogEl.querySelector(".settings-dialog-options");
   if (!body) return;
   const titleEl = settingsDialogEl.querySelector(".settings-dialog-title");
-  const dialog = settingsDialogEl.querySelector(".settings-dialog");
   if (titleEl) titleEl.textContent = t("customCSSConfirmTitle");
-  if (dialog) dialog.classList.add("settings-dialog-css-confirm");
-  // Three paragraphs, read in this order: what can go wrong, the way out, and
-  // the one practical snag with the way out. The middle one carries the escape
-  // route, and it is the only place in the product that ever teaches it -- so it
-  // gets its own paragraph rather than a clause tacked onto the warning.
   body.innerHTML = `
     <p class="settings-dialog-notice">${t("customCSSConfirmNotice")}</p>
     <p class="settings-dialog-escape">${t("customCSSConfirmEscape")}</p>
-    <p class="settings-dialog-hint">${t("customCSSConfirmPinHint")}</p>
-    <p class="settings-dialog-count">${fmt(t("customCSSConfirmCount"), { n: CSS_CONFIRM_SECONDS })}</p>
     <div class="settings-dialog-actions">
-      <button class="settings-dialog-back" type="button">${t("back")}</button>
-      <button class="settings-dialog-confirm" type="button" disabled>${t("confirm")}</button>
+      <button class="settings-dialog-confirm" type="button" disabled>${cssGateLabel(CSS_GATE_SECONDS)}</button>
     </div>
   `;
   settingsDialogEl.classList.add("visible");
-  startCSSConfirmCountdown();
+  cssGateOpen = true;
+  startCSSGateCountdown();
 }
 // One tick per second, all scheduled up front rather than one interval that
-// reschedules itself: every handle then lands in cssConfirmTimers, so the single
+// reschedules itself: every handle then lands in cssGateTimers, so the single
 // cleanup below cannot miss a repeat.
-function startCSSConfirmCountdown() {
-  cssConfirmArmed = false;
-  settingsDialogEl.classList.add("css-confirm-waiting");
-  const countEl = settingsDialogEl.querySelector(".settings-dialog-count");
+//
+// The number lives in the confirm button's own label, so nothing has to be kept
+// in step with a second element, and the last tick puts the ordinary `confirm`
+// word back -- which is what leaves the gate's button indistinguishable from
+// every other dialog's by the time it can be pressed.
+function startCSSGateCountdown() {
+  cssGateArmed = false;
   const btn = settingsDialogEl.querySelector(".settings-dialog-confirm");
-  for (let sec = 1; sec <= CSS_CONFIRM_SECONDS; sec++) {
-    cssConfirmTimers.push(setTimeout(() => {
-      if (sec < CSS_CONFIRM_SECONDS) {
-        if (countEl) countEl.textContent = fmt(t("customCSSConfirmCount"), { n: CSS_CONFIRM_SECONDS - sec });
+  for (let sec = 1; sec <= CSS_GATE_SECONDS; sec++) {
+    cssGateTimers.push(setTimeout(() => {
+      const left = CSS_GATE_SECONDS - sec;
+      if (left > 0) {
+        if (btn) btn.textContent = cssGateLabel(left);
         return;
       }
-      cssConfirmArmed = true;
-      settingsDialogEl.classList.remove("css-confirm-waiting");
-      if (btn) btn.disabled = false;
-      if (countEl) countEl.textContent = "";
-      cssConfirmTimers = [];
+      cssGateArmed = true;
+      if (btn) {
+        btn.textContent = t("confirm");
+        btn.disabled = false;
+      }
+      cssGateTimers = [];
     }, sec * 1000));
   }
 }
-// Clears the lock and its ticks and restores the dialog's class list. This is
-// the only place that touches cssConfirmTimers, so every exit -- confirm, back,
-// the close button, Escape, a backdrop click, a storage event -- is covered by
-// whoever calls it. It does not decide what becomes of cssConfirmPending.
-function stopCSSConfirmCountdown() {
-  cssConfirmTimers.forEach((id) => clearTimeout(id));
-  cssConfirmTimers = [];
-  cssConfirmArmed = false;
-  if (!settingsDialogEl) return;
-  settingsDialogEl.classList.remove("css-confirm-waiting");
-  const dialog = settingsDialogEl.querySelector(".settings-dialog");
-  if (dialog) dialog.classList.remove("settings-dialog-css-confirm");
+// Clears the lock and its ticks. This is the only place that touches
+// cssGateTimers, so every exit -- the close button, Escape, a backdrop click, a
+// finished gate, a later dialog -- is covered by whoever calls it. The
+// `settings-dialog-css-confirm` class is not removed here: openSettingsDialog()
+// is the single owner of the dialog's width classes and re-derives them on every
+// open.
+function stopCSSGateCountdown() {
+  cssGateTimers.forEach((id) => clearTimeout(id));
+  cssGateTimers = [];
+  cssGateArmed = false;
+  cssGateOpen = false;
 }
-// The second confirm, and the only route by which the pending sheet reaches
-// storage. The `armed` test is not redundant with the button's `disabled`
-// attribute: that only stops a pointer, so without this the eight seconds would
-// be advisory rather than enforced.
-function confirmCSSWarning() {
-  if (cssConfirmPending === null || !settingsDialogItem || !settingsDialogEl) return;
-  if (!cssConfirmArmed) return;
-  applySetting(settingsDialogItem.action, cssConfirmPending);
-  closeSettingsDialog();
-  renderSettingsPanel();
-}
-// "Back" returns to the editing field with the text intact. Without it the only
-// way out of the stage would be to throw the sheet away, which would make typing
-// a long stylesheet riskier than it was before this stage existed.
-function backToCSSStage() {
-  const pending = cssConfirmPending;
+// The gate's confirm, and the only route by which the editor opens. The `armed`
+// test is not redundant with the button's `disabled` attribute: that only stops
+// a pointer, so without this the eight seconds would be advisory rather than
+// enforced.
+function confirmCSSGate() {
+  if (!cssGateArmed) return;
   const item = settingsDialogItem;
-  stopCSSConfirmCountdown();
-  cssConfirmPending = null;
+  stopCSSGateCountdown();
+  // Set before reopening: openSettingsDialog() consults this flag to decide
+  // whether the gate still has to be shown, and answering "yes" would land
+  // straight back here.
+  cssGatePassed = true;
   if (!item) {
     closeSettingsDialog();
     return;
   }
   openSettingsDialog(item);
-  const body = settingsDialogEl && settingsDialogEl.querySelector(".settings-dialog-options");
-  const area = body && body.querySelector(".settings-dialog-textarea");
-  if (area) area.value = pending == null ? "" : pending;
 }
 // Reads the shortcut dialog's three fields and either saves or reports the first
 // problem. A blank weight means the default; a blank title or an unusable url is
@@ -1349,12 +1344,12 @@ function confirmDeleteShortcut() {
   updateShortcuts();
 }
 // The single exit for every way the dialog can be dismissed -- the close button,
-// Escape, a backdrop click, a finished confirm, "Back" mid-stage. Keeping it the
-// only exit is what makes "the countdown is always stopped, and a pending sheet
-// is always dropped" true without repeating that cleanup at five call sites.
+// Escape, a backdrop click, a finished confirm, the gate handing over to the
+// editor. Keeping it the only exit is what makes "the countdown is always
+// stopped, and the gate is always torn down" true without repeating that cleanup
+// at five call sites.
 function closeSettingsDialog() {
-  stopCSSConfirmCountdown();
-  cssConfirmPending = null;
+  stopCSSGateCountdown();
   if (settingsDialogEl) settingsDialogEl.classList.remove("visible");
   settingsDialogItem = null;
 }
@@ -1553,21 +1548,17 @@ document.addEventListener("DOMContentLoaded", async () => {
         closeSettingsDialog();
         return;
       }
-      if (e.target.closest(".settings-dialog-back")) {
-        backToCSSStage();
-        return;
-      }
       if (e.target.closest(".settings-dialog-confirm")) {
-        // The confirmation stage is recognised by its pending sheet rather than
-        // by a kind -- settingsDialogItem stays the css item all the way through
-        // -- so this branch order is the only place the two stages differ.
-        if (cssConfirmPending !== null) {
-          confirmCSSWarning();
-          return;
-        }
         const kind = settingsDialogItem && settingsDialogItem.kind;
         if (kind === "shortcut") confirmShortcutDialog();
-        else if (kind === "css") requestCustomCSSApply();
+        else if (kind === "css") {
+          // The css dialog has two stages sharing this button: the gate that
+          // opens it and the editor that saves it. They are told apart by state
+          // rather than by some field in the dialog, so the same click routes
+          // the same way in a browser and under the test harness.
+          if (cssGateOpen) confirmCSSGate();
+          else confirmCustomCSSDialog();
+        }
         else confirmNumberSetting();
         return;
       }
@@ -1586,9 +1577,10 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (!e.target.closest(".settings-dialog")) closeSettingsDialog();
     });
     // Enter confirms the open dialog. Escape (handled on document) closes it.
-    // The custom CSS variant is deliberately absent from this list: its field is
-    // a textarea, where Enter has to insert a newline. That dialog commits on the
-    // confirm button alone.
+    // The custom CSS dialog is deliberately absent from this list -- both of its
+    // stages: one carries a textarea, where Enter has to insert a newline, and
+    // the other leads straight into that one, so Enter should not do there what
+    // it cannot do one stage later. It commits on the confirm button alone.
     settingsDialogEl.addEventListener("keydown", (e) => {
       if (e.key !== "Enter") return;
       const kind = settingsDialogItem && settingsDialogItem.kind;
@@ -1630,12 +1622,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     // reload, and no permission for the popup to reach in here. `key === null`
     // covers localStorage.clear().
     //
-    // An in-flight confirmation is dropped rather than committed: the user has
-    // just asked for the sheet to go away, and letting a pending value land
-    // afterwards would re-break the page they just rescued.
+    // Nothing in flight has to be dropped here any more, because there is
+    // nothing in flight: the editor writes only when its confirm is pressed, and
+    // the gate only stands while nothing is stored -- which is the state a
+    // rescue leaves behind. A dialog left open across a rescue therefore still
+    // offers to write, exactly as it did before the gate existed.
     window.addEventListener("storage", (e) => {
       if (e.key !== STORAGE_KEYS.customCSS && e.key !== null) return;
-      if (cssConfirmPending !== null) closeSettingsDialog();
       updateCustomCSS();
       renderSettingsPanel();
     });

@@ -14,7 +14,8 @@ const STORAGE_KEYS = {
   searchTransparency: "searchTransparency",
   showClickFx: "showClickFx",
   shortcuts: "shortcuts",
-  customCSS: "customCSS"
+  customCSS: "customCSS",
+  cssGateAck: "cssGateAck"
 };
 const SEARCH_URLS = {
   google: "https://www.google.com/search?q=",
@@ -843,14 +844,17 @@ let settingsDialogItem = null;
 // editor, and the gate's confirm button stays locked for this many seconds. One
 // number, so tuning the pause is a one-line change.
 const CSS_GATE_SECONDS = 8;
-// The gate's state: whether it is the stage currently on screen, whether its
-// wait has elapsed, and whether this document has already cleared it once. The
-// last one is deliberately not stored: it only spares a user who has just read
-// the warning from waiting it out again after clicking the tile a second time.
+// The gate's state: whether it is the stage currently on screen, and whether its
+// wait has elapsed. Agreement with the warning is remembered permanently under
+// STORAGE_KEYS.cssGateAck: the gate guards the *first* switch-on only, so once
+// its confirm has been pressed it never comes back -- not on a reload, not in a
+// later session, and not after the popup rescue clears the sheet.
 let cssGateOpen = false;
 let cssGateArmed = false;
 let cssGateTimers = [];
-let cssGatePassed = false;
+function cssGateAcked() {
+  return localStorage.getItem(STORAGE_KEYS.cssGateAck) === "true";
+}
 
 function engineOptions() {
   const options = [];
@@ -1036,11 +1040,11 @@ function openSettingsDialog(item) {
   const isShortcut = item.kind === "shortcut";
   const isCSS = item.kind === "css";
   // The one path that can take a working page and break it opens on a gate: the
-  // warning is read *before* the editor, never after a save. "First switch-on" is
-  // derived from the stored sheet -- customCSSEnabled() reports the same fact the
-  // tile does -- so this costs no storage key and no third state; cssGatePassed
-  // is session-only and just spares a second wait inside one document.
-  const isGate = isCSS && !customCSSEnabled() && !cssGatePassed;
+  // warning is read *before* the editor, never after a save. "First switch-on"
+  // is two derived facts: customCSSEnabled() reports the same thing the tile
+  // does, and cssGateAcked() reports the one bit that is stored -- the gate
+  // guards the first switch-on ever, not the first one of each session.
+  const isGate = isCSS && !customCSSEnabled() && !cssGateAcked();
   // Derived together on every open, so no other function has to undo them: the
   // gate is a css dialog of its own width, and never both at once.
   dialog.classList.toggle("settings-dialog-number", isNumber);
@@ -1287,10 +1291,12 @@ function confirmCSSGate() {
   if (!cssGateArmed) return;
   const item = settingsDialogItem;
   stopCSSGateCountdown();
-  // Set before reopening: openSettingsDialog() consults this flag to decide
+  // Latch before reopening: openSettingsDialog() consults this flag to decide
   // whether the gate still has to be shown, and answering "yes" would land
-  // straight back here.
-  cssGatePassed = true;
+  // straight back here. Stored, not in a variable, so the agreement survives
+  // reloads and later sessions -- the user has read the warning once, and that
+  // is the whole deal.
+  setStored(STORAGE_KEYS.cssGateAck, "true");
   if (!item) {
     closeSettingsDialog();
     return;

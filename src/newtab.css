@@ -188,6 +188,13 @@ body.bg-stripes {
      max-width; the fallback is what a bare newtab.html paints before JS runs. */
   max-width: var(--search-length, 500px);
   margin: 0 auto;
+  /* Box transparency, shared by both styles. The fade wraps the whole box --
+     field, placeholder and Go button together -- so it means the same thing
+     whether the frame is a full box or a bare underline. --search-transparency
+     holds the transparency in percent, hence the inversion; the fallback 0 is
+     the box exactly as it has always been drawn, and matches
+     SEARCH_LIMITS.transparency.default. */
+  opacity: calc(1 - var(--search-transparency, 0) / 100);
 }
 
 .search-input {
@@ -318,7 +325,7 @@ body.bg-stripes {
   font-style: normal;
   font-weight: 900;
   font-display: block;
-  src: url('./fa-solid-900-subset.woff2?v=3b15cccf') format('woff2');
+  src: url('./fa-solid-900-subset.woff2?v=d932d08c') format('woff2');
 }
 
 .fa-solid {
@@ -350,6 +357,7 @@ body.bg-stripes {
 .fa-border-top-left { --fa: "\f853"; }
 .fa-border-all { --fa: "\f84c"; }
 .fa-text-width { --fa: "\f035"; }
+.fa-droplet { --fa: "\f043"; }
 .fa-link { --fa: "\f0c1"; }
 .fa-square-plus { --fa: "\f0fe"; }
 

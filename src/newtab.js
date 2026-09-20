@@ -11,6 +11,7 @@ const STORAGE_KEYS = {
   searchRadius: "searchRadius",
   searchBorder: "searchBorder",
   searchLength: "searchLength",
+  searchTransparency: "searchTransparency",
   showClickFx: "showClickFx",
   shortcuts: "shortcuts"
 };
@@ -28,14 +29,24 @@ const SEARCH_STYLES = ["modern", "geek"];
 // Old value -> new value. getStored() would fall back to "modern" for any
 // unknown value, which would silently promote underline users, so map instead.
 const LEGACY_SEARCH_STYLES = { square: "modern", rounded: "modern", line: "geek" };
-// Allowed ranges, in px, for the numeric search box settings. `default` is both
-// what is used when nothing is stored and what a stored 0 means: 0 is the
-// documented "keep the default" entry for every one of these settings. Keep
-// `default` in step with the fallbacks in newtab.css.
+// Allowed ranges for the numeric search box settings. `default` is both what is
+// used when nothing is stored and what a stored 0 means: 0 is the documented
+// "keep the default" entry for every one of these settings. `unit` is what the
+// panel prints beside the value, and also what the stylesheet gets handed --
+// except for the transparency, which travels as a bare number (see styleValue).
+// Keep each `default` in step with the fallback in newtab.css.
 const SEARCH_LIMITS = {
-  radius: { min: 1, max: 60, default: 8 },
-  border: { min: 1, max: 10, default: 1 },
-  length: { min: 200, max: 1200, default: 500 }
+  radius: { min: 1, max: 60, default: 8, unit: "px" },
+  border: { min: 1, max: 10, default: 1, unit: "px" },
+  length: { min: 200, max: 1200, default: 500, unit: "px" },
+  // How see-through the whole box is, in percent: 100 hides it entirely, 1 is a
+  // barely perceptible fade. The default is 0 -- no transparency at all, ie the
+  // box as it has always been drawn. This is the one setting whose default is
+  // not a value inside its own range: the range starts at 1 because 0 is the
+  // reserved "keep the default" token, and here the default *is* 0 percent.
+  // Applies to both styles, so it means the same thing to a full box and to a
+  // bare underline.
+  transparency: { min: 1, max: 100, default: 0, unit: "%" }
 };
 // User-defined shortcuts shown in the bottom row. Four is the cap: it keeps the
 // row on one line at any window width, and matches the 1-4 weight scale below.
@@ -82,7 +93,8 @@ const I18N = {
     searchRadius: "Corner Radius",
     searchBorder: "Border Weight",
     searchLength: "Box Length",
-    rangeHint: "Range {min}-{max}px · 0 = default ({default}px)",
+    searchTransparency: "Box Transparency",
+    rangeHint: "Range {min}-{max}{unit} · 0 = default ({default}{unit})",
     invalidNumber: "Enter a whole number from {min} to {max}, or 0",
     confirm: "OK",
     appearance: "Appearance",
@@ -139,7 +151,8 @@ const I18N = {
     searchRadius: "圆角大小",
     searchBorder: "框线粗细",
     searchLength: "搜索框长度",
-    rangeHint: "范围 {min}–{max}px · 0 = 默认（{default}px）",
+    searchTransparency: "搜索框透明度",
+    rangeHint: "范围 {min}–{max}{unit} · 0 = 默认（{default}{unit}）",
     invalidNumber: "请输入 {min}–{max} 之间的整数，或 0",
     confirm: "确定",
     appearance: "外观",
@@ -335,8 +348,13 @@ function readLimit(key, spec) {
   if (n === 0) return spec.default;
   return isValidLimit(n, spec) ? n : spec.default;
 }
-function styleSize(key, spec) {
-  return `${readLimit(key, spec)}px`;
+// Serialises a resolved numeric setting for the stylesheet. A px setting is
+// published with its unit attached and read straight back by the rule that uses
+// it; the transparency is published as a bare number, because its rule does
+// arithmetic on it (opacity: calc(1 - n / 100)).
+function styleValue(key, spec) {
+  const n = readLimit(key, spec);
+  return spec.unit === "%" ? String(n) : `${n}${spec.unit}`;
 }
 function updateSearchStyle() {
   const form = document.getElementById("search-form");
@@ -350,11 +368,14 @@ function updateSearchStyle() {
   // --search-length so the box can actually reach the configured width. A
   // variable set on the form would be invisible there. The radius is written for
   // both styles -- it is inert on the underline style, and writing it
-  // unconditionally keeps a style switch from losing the value.
+  // unconditionally keeps a style switch from losing the value. The transparency
+  // could live on the form (its rule, `.search-box`, is a descendant) but rides
+  // along here so all four settings are published in one place.
   const root = document.documentElement.style;
-  root.setProperty("--search-radius", styleSize(STORAGE_KEYS.searchRadius, SEARCH_LIMITS.radius));
-  root.setProperty("--search-border", styleSize(STORAGE_KEYS.searchBorder, SEARCH_LIMITS.border));
-  root.setProperty("--search-length", styleSize(STORAGE_KEYS.searchLength, SEARCH_LIMITS.length));
+  root.setProperty("--search-radius", styleValue(STORAGE_KEYS.searchRadius, SEARCH_LIMITS.radius));
+  root.setProperty("--search-border", styleValue(STORAGE_KEYS.searchBorder, SEARCH_LIMITS.border));
+  root.setProperty("--search-length", styleValue(STORAGE_KEYS.searchLength, SEARCH_LIMITS.length));
+  root.setProperty("--search-transparency", styleValue(STORAGE_KEYS.searchTransparency, SEARCH_LIMITS.transparency));
 }
 // Escapes the characters that are special in markup, quote included: shortcut
 // titles and urls are user input and land in element text and in an href
@@ -782,9 +803,10 @@ function getSettingsItems(tab) {
       { action: "set-style", icon: "fa-shapes", labelKey: "searchStyle", kind: "cycle", key: STORAGE_KEYS.searchStyle, fallback: "modern",
         options: SEARCH_STYLES.map((s) => [s, s]) }
     ];
-    // The size settings are sandwiched between the style selector and the
-    // Search button, and depend on the style: a corner radius means nothing on
-    // the underline style, so it is only offered for "modern".
+    // The numeric settings are sandwiched between the style selector and the
+    // Search button. Only the corner radius depends on the style -- it means
+    // nothing on an underline, so it is offered for "modern" alone; the border
+    // weight, the box length and the transparency are common to both.
     if (style === "modern") {
       items.push({ action: "set-radius", icon: "fa-border-top-left", labelKey: "searchRadius", kind: "number",
         key: STORAGE_KEYS.searchRadius, spec: SEARCH_LIMITS.radius });
@@ -794,6 +816,11 @@ function getSettingsItems(tab) {
         key: STORAGE_KEYS.searchBorder, spec: SEARCH_LIMITS.border },
       { action: "set-length", icon: "fa-text-width", labelKey: "searchLength", kind: "number",
         key: STORAGE_KEYS.searchLength, spec: SEARCH_LIMITS.length },
+      // Transparency is the one extra that both styles get: the fade wraps the
+      // whole box rather than its frame, so it reads the same on a full box and
+      // on a bare underline.
+      { action: "set-transparency", icon: "fa-droplet", labelKey: "searchTransparency", kind: "number",
+        key: STORAGE_KEYS.searchTransparency, spec: SEARCH_LIMITS.transparency },
       { action: "toggle-go", icon: "fa-arrow-right", labelKey: "showGo", kind: "toggle", key: STORAGE_KEYS.showGo, fallback: "true" }
     );
     return items;
@@ -845,7 +872,7 @@ function itemValues(item) {
 }
 function itemStatus(item) {
   if (item.kind === "toggle") return t(itemValue(item) === "true" ? "on" : "off");
-  if (item.kind === "number") return `${itemValue(item)} px`;
+  if (item.kind === "number") return `${itemValue(item)} ${item.spec.unit}`;
   const option = item.options.find((o) => o[0] === itemValue(item));
   return option ? t(option[1]) : "";
 }
@@ -902,7 +929,7 @@ function settingsPanelVisible() {
 // what the "keep the default" entry resolves to, so the field never asks for a
 // value the validation would then refuse.
 function numberHint(spec) {
-  return fmt(t("rangeHint"), { min: spec.min, max: spec.max, default: spec.default });
+  return fmt(t("rangeHint"), { min: spec.min, max: spec.max, default: spec.default, unit: spec.unit });
 }
 // Same contract for the shortcut weight field: the accepted range, and what an
 // empty field resolves to. Built from SHORTCUT_WEIGHT, never hard-coded.
@@ -1132,6 +1159,10 @@ function applySetting(action, value) {
       break;
     case "set-length":
       setStored(STORAGE_KEYS.searchLength, value);
+      updateSearchStyle();
+      break;
+    case "set-transparency":
+      setStored(STORAGE_KEYS.searchTransparency, value);
       updateSearchStyle();
       break;
     case "set-lang":

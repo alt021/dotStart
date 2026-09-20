@@ -13,7 +13,8 @@ const STORAGE_KEYS = {
   searchLength: "searchLength",
   searchTransparency: "searchTransparency",
   showClickFx: "showClickFx",
-  shortcuts: "shortcuts"
+  shortcuts: "shortcuts",
+  customCSS: "customCSS"
 };
 const SEARCH_URLS = {
   google: "https://www.google.com/search?q=",
@@ -102,7 +103,9 @@ const I18N = {
     shortcutsTab: "Shortcuts",
     advanced: "Advanced",
     customCSS: "Custom CSS",
-    comingSoon: "Coming soon",
+    customCSSHint: "Write CSS here. It overrides the built-in styles.",
+    customCSSNotSet: "Not set",
+    customCSSEnabled: "Enabled",
     on: "On",
     off: "Off",
     addShortcut: "Add shortcut",
@@ -160,7 +163,9 @@ const I18N = {
     shortcutsTab: "快捷方式",
     advanced: "高级",
     customCSS: "自定义 CSS",
-    comingSoon: "即将推出",
+    customCSSHint: "在此写入 CSS，将覆盖内置样式。",
+    customCSSNotSet: "未配置",
+    customCSSEnabled: "已启用",
     on: "已启用",
     off: "已停用",
     addShortcut: "添加快捷方式",
@@ -376,6 +381,57 @@ function updateSearchStyle() {
   root.setProperty("--search-border", styleValue(STORAGE_KEYS.searchBorder, SEARCH_LIMITS.border));
   root.setProperty("--search-length", styleValue(STORAGE_KEYS.searchLength, SEARCH_LIMITS.length));
   root.setProperty("--search-transparency", styleValue(STORAGE_KEYS.searchTransparency, SEARCH_LIMITS.transparency));
+}
+// Custom CSS: one string under STORAGE_KEYS.customCSS, injected into a <style>
+// element appended to <head>. The placement IS the priority mechanism --
+// newtab.css is linked in <head> and declares nothing `!important`, so between
+// two rules of equal specificity the one later in document order wins. Appending
+// at DOMContentLoaded therefore puts the user's sheet after that link, on every
+// load, without needing `!important` anywhere.
+//
+// The text reaches the element through `textContent`, never through innerHTML:
+// the sheet is user input, and textContent is not re-parsed, so a stray
+// "</style>" inside the CSS stays inert text rather than ending the element.
+//
+// No content means OFF, and a sheet that is entirely whitespace counts as no
+// content: writeCustomCSS() normalises that down to a removed key, so "stored"
+// and "non-blank" are the same state -- which is exactly what the tile reports.
+let customStyleEl = null;
+function readCustomCSS() {
+  try {
+    return localStorage.getItem(STORAGE_KEYS.customCSS) || "";
+  } catch (_) {
+    return "";
+  }
+}
+function customCSSEnabled() {
+  return readCustomCSS().trim() !== "";
+}
+function writeCustomCSS(text) {
+  const value = String(text).trim();
+  try {
+    if (value === "") localStorage.removeItem(STORAGE_KEYS.customCSS);
+    else localStorage.setItem(STORAGE_KEYS.customCSS, value);
+  } catch (_) { /* storage may be unavailable */ }
+  return value;
+}
+function updateCustomCSS() {
+  if (!customCSSEnabled()) {
+    // Drop the element rather than blanking it, so a disabled feature leaves no
+    // trace in the document; nulling the handle re-creates it on the way back
+    // in, which re-appends it last and keeps the precedence above intact.
+    if (customStyleEl) {
+      customStyleEl.remove();
+      customStyleEl = null;
+    }
+    return;
+  }
+  if (!customStyleEl) {
+    customStyleEl = document.createElement("style");
+    customStyleEl.id = "custom-css";
+    document.head.appendChild(customStyleEl);
+  }
+  customStyleEl.textContent = readCustomCSS();
 }
 // Escapes the characters that are special in markup, quote included: shortcut
 // titles and urls are user input and land in element text and in an href
@@ -855,7 +911,10 @@ function getSettingsItems(tab) {
   return [
     { action: "set-lang", icon: "fa-language", labelKey: "language", kind: "cycle", key: STORAGE_KEYS.lang, fallback: "en",
       options: [["en", "english"], ["zh", "chinese"]] },
-    { action: "custom-css", icon: "fa-code", labelKey: "customCSS", kind: "disabled", statusKey: "comingSoon" }
+    // The status line is built here rather than in itemStatus(): the enabled
+    // state is "is anything stored at all", not one of a list of values.
+    { action: "custom-css", icon: "fa-code", labelKey: "customCSS", kind: "css",
+      statusText: t(customCSSEnabled() ? "customCSSEnabled" : "customCSSNotSet") }
   ];
 }
 function itemValue(item) {
@@ -951,8 +1010,10 @@ function openSettingsDialog(item) {
   const dialog = settingsDialogEl.querySelector(".settings-dialog");
   const isNumber = item.kind === "number";
   const isShortcut = item.kind === "shortcut";
+  const isCSS = item.kind === "css";
   dialog.classList.toggle("settings-dialog-number", isNumber);
   dialog.classList.toggle("settings-dialog-shortcut", isShortcut);
+  dialog.classList.toggle("settings-dialog-css", isCSS);
   if (isShortcut) {
     const isNew = item.index < 0;
     titleEl.textContent = t(isNew ? "addShortcut" : "editShortcut");
@@ -1001,6 +1062,29 @@ function openSettingsDialog(item) {
     });
     settingsDialogEl.classList.add("visible");
     fields.title.focus();
+    return;
+  }
+  if (isCSS) {
+    titleEl.textContent = t(item.labelKey);
+    // A textarea, not an input: the sheet is source, so it wraps and keeps its
+    // newlines. Prefilled through `.value`, never through the markup -- this is
+    // user input and would be parsed as HTML there. No error line: any CSS at
+    // all is acceptable, and invalid rules are dropped by the parser, so there
+    // is nothing to refuse. A blank field is how the user turns the feature off.
+    body.innerHTML = `
+      <div class="settings-dialog-field">
+        <textarea class="settings-dialog-input settings-dialog-textarea" spellcheck="false"
+                  autocomplete="off" aria-label="${t(item.labelKey)}"
+                  placeholder="${t("customCSSHint")}"></textarea>
+      </div>
+      <div class="settings-dialog-actions">
+        <button class="settings-dialog-confirm" type="button">${t("confirm")}</button>
+      </div>
+    `;
+    const area = body.querySelector(".settings-dialog-textarea");
+    area.value = readCustomCSS();
+    settingsDialogEl.classList.add("visible");
+    area.focus();
     return;
   }
   const current = itemValue(item);
@@ -1055,6 +1139,21 @@ function confirmNumberSetting() {
     return;
   }
   applySetting(item.action, String(n));
+  closeSettingsDialog();
+  renderSettingsPanel();
+}
+// Reads the custom CSS dialog's textarea. Nothing to validate: whatever the
+// field holds becomes the sheet, and clearing it is the documented way to turn
+// the feature back off. Read the field off `.settings-dialog-options`, like
+// every other dialog field -- see the note in confirmShortcutDialog().
+function confirmCustomCSSDialog() {
+  const item = settingsDialogItem;
+  if (!item || item.kind !== "css" || !settingsDialogEl) return;
+  const body = settingsDialogEl.querySelector(".settings-dialog-options");
+  if (!body) return;
+  const area = body.querySelector(".settings-dialog-textarea");
+  if (!area) return;
+  applySetting(item.action, area.value);
   closeSettingsDialog();
   renderSettingsPanel();
 }
@@ -1174,6 +1273,10 @@ function applySetting(action, value) {
         btn.textContent = t(btn.dataset.tab);
       });
       break;
+    case "custom-css":
+      writeCustomCSS(value);
+      updateCustomCSS();
+      break;
   }
 }
 function toggleCurrent(action) {
@@ -1215,6 +1318,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     updateDots();
     updateGo();
     updateSearchStyle();
+    updateCustomCSS();
     updatePrompt();
     updateTime();
     updateUI();
@@ -1277,10 +1381,11 @@ document.addEventListener("DOMContentLoaded", async () => {
       } else if (item.kind === "cycle") {
         cycleCurrent(item.action);
         renderSettingsPanel();
-      } else if (item.kind === "select" || item.kind === "number" || item.kind === "shortcut") {
-        // All three open a dialog: a list of values, one field, or the shortcut
-        // form (title / url / weight). The add tile is a "shortcut" item with
-        // index -1, so it lands here too.
+      } else if (item.kind === "select" || item.kind === "number" ||
+                 item.kind === "shortcut" || item.kind === "css") {
+        // All four open a dialog: a list of values, one field, the shortcut form
+        // (title / url / weight) or the custom CSS sheet. The add tile is a
+        // "shortcut" item with index -1, so it lands here too.
         openSettingsDialog(item);
       }
     });
@@ -1298,7 +1403,9 @@ document.addEventListener("DOMContentLoaded", async () => {
         return;
       }
       if (e.target.closest(".settings-dialog-confirm")) {
-        if (settingsDialogItem && settingsDialogItem.kind === "shortcut") confirmShortcutDialog();
+        const kind = settingsDialogItem && settingsDialogItem.kind;
+        if (kind === "shortcut") confirmShortcutDialog();
+        else if (kind === "css") confirmCustomCSSDialog();
         else confirmNumberSetting();
         return;
       }
@@ -1317,6 +1424,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (!e.target.closest(".settings-dialog")) closeSettingsDialog();
     });
     // Enter confirms the open dialog. Escape (handled on document) closes it.
+    // The custom CSS variant is deliberately absent from this list: its field is
+    // a textarea, where Enter has to insert a newline. That dialog commits on the
+    // confirm button alone.
     settingsDialogEl.addEventListener("keydown", (e) => {
       if (e.key !== "Enter") return;
       const kind = settingsDialogItem && settingsDialogItem.kind;

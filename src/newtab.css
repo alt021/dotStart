@@ -647,6 +647,36 @@ body.bg-stripes {
   padding-top: 0.6rem;
 }
 
+/* Custom CSS variant: one large wrapping textarea over the same action row.
+   This is the widest dialog of the set -- a stylesheet is written as source and
+   needs room -- and its width is spelled as `min(720px, 70vw)` so it lands
+   exactly on `.settings-dialog`'s own max-width rather than fighting it
+   (a min-width that exceeds a max-width wins, which would have pushed the box
+   past the 70vw every other dialog respects).
+
+   `white-space: pre-wrap` with `overflow-wrap: break-word` is what makes the
+   field wrap: newlines are kept, long lines fold, and a long unbroken selector
+   breaks instead of forcing a horizontal scrollbar. `resize: vertical` is
+   offered because there is no single right height for a stylesheet.
+
+   `user-select: text` is not redundant -- `body` sets `user-select: none` and
+   that inherits down to here; without this the sheet could not be selected,
+   copied or dragged over. */
+.settings-dialog-css {
+  min-width: min(720px, 70vw);
+}
+
+.settings-dialog-css .settings-dialog-textarea {
+  display: block;
+  min-height: 16rem;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  resize: vertical;
+  user-select: text;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
 .settings-dialog-field {
   padding: 0.9rem 1.25rem 0;
 }

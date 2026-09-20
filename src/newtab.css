@@ -619,9 +619,9 @@ body.bg-stripes {
   transition: background 0.1s;
 }
 
-.settings-dialog-option + .settings-dialog-option {
-  border-top: 1px solid var(--border);
-}
+/* No rule between consecutive options: the hover fill is what marks the option
+   under the cursor. Do not reintroduce a `border-top` separator here -- the
+   icon-plate/label divider inside a tile was removed for the same reason. */
 
 .settings-dialog-option:hover {
   background: var(--dot);

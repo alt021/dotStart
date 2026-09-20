@@ -108,7 +108,9 @@ const I18N = {
     customCSSNotSet: "Not set",
     customCSSEnabled: "Enabled",
     customCSSConfirmTitle: "Before you enable custom CSS",
-    customCSSConfirmNotice: "Custom CSS can stop this page from working. If it does, open the dotStart toolbar button and choose “Clear custom CSS”.",
+    customCSSConfirmNotice: "Custom CSS can restyle anything on this page, the settings panel included. If it leaves the page unworkable, nothing here can be clicked any more.",
+    customCSSConfirmEscape: "The way out sits outside the page: open the dotStart toolbar button and choose “Clear custom CSS”. That button keeps working when the page is blank.",
+    customCSSConfirmPinHint: "Can't see it? Pin dotStart from your browser's extensions menu first.",
     customCSSConfirmCount: "Hold on — you can confirm in {n}s",
     actionTitle: "Clear custom CSS",
     on: "On",
@@ -174,7 +176,9 @@ const I18N = {
     customCSSNotSet: "未配置",
     customCSSEnabled: "已启用",
     customCSSConfirmTitle: "在启用自定义 CSS 之前",
-    customCSSConfirmNotice: "自定义 CSS 可能导致本页失效。若发生，请点开 dotStart 工具栏按钮并选择「清除自定义 CSS」。",
+    customCSSConfirmNotice: "自定义 CSS 能改写本页上的任何东西，设置面板自己也算在内。一旦它让本页失效，你在这里就点不动任何东西了。",
+    customCSSConfirmEscape: "出口在本页之外：点开 dotStart 工具栏按钮，选择「清除自定义 CSS」。页面全白了它也照样能用。",
+    customCSSConfirmPinHint: "工具栏上看不到它？先在浏览器的扩展菜单里把 dotStart 固定住。",
     customCSSConfirmCount: "请稍候 — {n} 秒后可确认",
     actionTitle: "清除自定义 CSS",
     on: "已启用",
@@ -1218,8 +1222,14 @@ function openCSSConfirmStage() {
   const dialog = settingsDialogEl.querySelector(".settings-dialog");
   if (titleEl) titleEl.textContent = t("customCSSConfirmTitle");
   if (dialog) dialog.classList.add("settings-dialog-css-confirm");
+  // Three paragraphs, read in this order: what can go wrong, the way out, and
+  // the one practical snag with the way out. The middle one carries the escape
+  // route, and it is the only place in the product that ever teaches it -- so it
+  // gets its own paragraph rather than a clause tacked onto the warning.
   body.innerHTML = `
     <p class="settings-dialog-notice">${t("customCSSConfirmNotice")}</p>
+    <p class="settings-dialog-escape">${t("customCSSConfirmEscape")}</p>
+    <p class="settings-dialog-hint">${t("customCSSConfirmPinHint")}</p>
     <p class="settings-dialog-count">${fmt(t("customCSSConfirmCount"), { n: CSS_CONFIRM_SECONDS })}</p>
     <div class="settings-dialog-actions">
       <button class="settings-dialog-back" type="button">${t("back")}</button>

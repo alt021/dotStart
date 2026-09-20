@@ -693,19 +693,33 @@ body.bg-stripes {
   min-width: min(520px, 70vw);
 }
 
-/* The stage's two paragraphs. They do not reuse .settings-dialog-field, which is
-   built to hold one full-width control. */
+/* The stage's body paragraphs. None of them reuses .settings-dialog-field, which
+   is built to hold one full-width control. */
 .settings-dialog-notice {
   padding: 0.9rem 1.25rem 0;
   font-size: 0.85rem;
   line-height: 1.55;
 }
 
-/* The countdown. Deliberately not an aria-live region: announcing every second
-   is noise for a screen reader, and the sentence above already explains the
-   wait. The part that matters -- the button becoming usable -- is announced by
-   the button itself once focus reaches it. */
-.settings-dialog-count {
+/* The way out gets its own paragraph and the heavier weight, because it is the
+   one line here that has to survive a skim. Emphasis is weight rather than
+   colour on purpose: var(--warn) is read by exactly one rule -- the red line in
+   the editor stage -- and a second reader would both break that assertion and
+   start a second warning colour the panel's monochrome look has no room for. */
+.settings-dialog-escape {
+  padding: 0.6rem 1.25rem 0;
+  font-size: 0.85rem;
+  line-height: 1.55;
+  font-weight: 500;
+}
+
+/* Tertiary lines under the paragraph block: the countdown and the practical
+   snag with the escape route. The countdown is deliberately not an aria-live
+   region -- announcing every second is noise for a screen reader, and the
+   paragraph above already explains the wait. The part that matters, the button
+   becoming usable, is announced by the button itself once focus reaches it. */
+.settings-dialog-count,
+.settings-dialog-hint {
   padding: 0.35rem 1.25rem 0;
   font-size: 0.75rem;
   color: var(--muted);

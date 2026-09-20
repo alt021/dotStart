@@ -8,3 +8,7 @@ Thumbs.db
 
 # Release artifact — uploaded to GitHub Releases manually
 ext-release.zip
+
+# Loadable builds, produced from a commit with git archive (never committed)
+dist-firefox.xpi
+dist-chromium.zip

@@ -25,6 +25,20 @@ alts.tech@hotmail.com
 
 **# 发行日志 Release Notes**
 
+// rel#2.2.0-20260920
+  **新增** 搜索框形状、长度等高级自定义
+  **Added** Advanced search box customization (shape, length and more)
+  **新增** 弹出式设置面板 取代原有右键菜单
+  **Added** Popup settings panel replacing the old context menu
+  **新增** 自定义快捷方式书签
+  **Added** Custom shortcut bookmarks
+  **新增** CSS样式表自定义
+  **Added** Custom CSS stylesheet
+  **新增** 工具栏按钮快速解决CSS问题
+  **Added** Toolbar button to quickly fix CSS issues
+  **修复** 清理旧函数旧代码 优化体积
+  **Fixed** Cleaned up legacy code and trimmed size
+
 // rel#2.1.0-20260911-Hotfix
   **修复** 解决Firefox和Chrome机制冲突问题
   **Fixed** Resolved Firefox/Chrome mechanism conflict

@@ -12,13 +12,15 @@ A minimalist new tab page with a real-time clock, multi-engine search box, confi
 - **Language**: HTML / CSS / vanilla JavaScript (ES2020 module)
 - **No build step** — `src/newtab.js` is the human-edited source. Do not introduce npm/bundlers.
 - **i18n**: `_locales/<locale>/messages.json` for extension metadata (`extName`, `extDescription`, and `actionTitle` for the toolbar button); in-app UI strings live in the `I18N` and `ONBOARDING_I18N` constants inside `src/newtab.js`. The popup is a second document that cannot reach those constants, so `src/popup.js` carries its own `POPUP_I18N` table — see the Custom CSS section for how the two are held in step.
-- **Manifest**: `chrome_url_overrides.newtab` → `newtab.html` (new tabs); `chrome_settings_overrides.homepage` → the same file (the homepage, for Firefox users who open the browser onto it); `action.default_popup` → `popup.html`
+- **Manifest**: `chrome_url_overrides.newtab` → `newtab.html` (new tabs); `action.default_popup` → `popup.html`. `chrome_settings_overrides` is deliberately **absent** here — Chrome refuses to load the extension if it carries a homepage it cannot use — and lives in `manifest.firefox.json`, a second manifest the build swaps in for the xpi. See "Permissions" and "Packaging".
 
 ## Key Files
 
 | File | Role |
 | --- | --- |
-| `manifest.json` | MV3 manifest. References `newtab.html` (both as the new tab override and as the homepage override), the toolbar `action` (`popup.html`) and the five icon files (16/48/96/128/256). No permission was added for the popup, and none for the homepage override. |
+| `manifest.json` | MV3 manifest, and the one Chrome loads. References `newtab.html` as the new tab override, the toolbar `action` (`popup.html`) and the five icon files (16/48/96/128/256). No permission was added for the popup, and `chrome_settings_overrides` must stay out of it — see the Permissions section. |
+| `manifest.firefox.json` | The same manifest plus `chrome_settings_overrides.homepage`. A packaging **input**, not an extension file: `make_dist.py` swaps it in for the xpi, and `.gitattributes` keeps it out of both artifacts. `test_settings.js` asserts the two differ by that key alone. |
+| `.gitattributes` | One job: `export-ignore` for the two files above, so `git archive` never ships them. |
 | `newtab.html` | Entry HTML; loads `./src/newtab.css` and `./src/newtab.js` as a module, and declares the favicon. |
 | `popup.html` | The toolbar button's popup. Loads `./src/popup.css` and `./src/popup.js`. No inline script (MV3 CSP). |
 | `src/popup.js` | The popup's whole behaviour: one button that removes the `customCSS` key. Carries its own two-language string table — see the Custom CSS section. |
@@ -170,9 +172,13 @@ The custom CSS sheet needs no permission and no CSP relaxation: a `<style>` elem
 
 The toolbar `action` needs no permission either. The popup is an extension page — it shares the extension origin, so it reads and writes the very same `localStorage` this page uses, and it renders nothing but a button and a line of text. There is no `background` service worker and no message passing anywhere in this feature; do not add `storage`, `scripting`, `tabs` or a `background` entry for it. `test_settings.js` asserts the permission array is still exactly `["search"]` and that no `optional_permissions` / `background` / `content_scripts` block has appeared.
 
-The homepage override needs no permission either — but it is the one entry here that is **visible to the user and revocable by them**, so it is worth knowing what it does and does not do. `chrome_url_overrides.newtab` only covers new tabs; a Firefox user who opens the browser onto their homepage (or clicks the home button) still got the stock page, so `chrome_settings_overrides.homepage` points at the same bundled `newtab.html` — a path inside the package, never a remote URL, which is also what Firefox requires and what the tests assert. Firefox asks the user once, on first use, and the choice stays visible and revocable under Settings → Home; it is not a silent hijack. Two caveats live outside this repo: Chrome's store policy makes settings overrides inconsistent with its single-purpose policy when other permissions are present (this extension declares `search`), and asks for the homepage's domain to be verified by the publishing account — local unpacked loading is unaffected. And a homepage override only sticks for a properly installed add-on: a temporary load via `about:debugging` is gone at restart, homepage and all.
+The homepage override needs no permission either, and it is the one entry here that is **visible to the user and revocable by them**. `chrome_url_overrides.newtab` only covers new tabs; a Firefox user who opens the browser onto their homepage, or clicks the home button, still got the stock page, so the Firefox manifest points `chrome_settings_overrides.homepage` at the same bundled `newtab.html`. Firefox asks the user once, on first use, and the choice stays visible and revocable under Settings → Home; it is not a silent hijack. A homepage override also only sticks for a properly installed add-on: a temporary load via `about:debugging` is gone at restart, homepage and all.
 
-Manifest permissions cannot be split per browser — there is no `browser_specific_settings` override for `permissions`, so Chrome and Firefox read the same array.
+**The two browsers want different values, so the key lives in a second manifest.** Chromium accepts a homepage override only as an absolute URL whose scheme is http or https: `CreateManifestURL()` in `chrome/common/extensions/manifest_handlers/settings_overrides_handler.cc` returns `nullopt` for anything else, and since `homepage` is then the only key under `chrome_settings_overrides`, `Parse()` fails and **the whole extension refuses to load** — "Invalid value for overriding homepage url: 'newtab.html'". Firefox is the opposite: a bundled page has to be named as a path relative to the manifest. No single value satisfies both, and `browser_specific_settings` cannot fork manifest keys, so `manifest.json` carries no `chrome_settings_overrides` at all, `manifest.firefox.json` adds it, and the build swaps that file in for the xpi. Whenever either browser does accept the key it adds a settings-override entry to the install prompt (`PermissionsParser::AddAPIPermission(kHomepage …)`), which is the visible-consent side of the same API. Do not "tidy up" by moving the key back into `manifest.json`: `test_settings.js` fails if it reappears there, because that regression is not a warning at install time, it is a refusal to install.
+
+Two caveats live outside this repo: Chrome's store policy makes settings overrides inconsistent with its single-purpose policy when other permissions are present (this extension declares `search`), and asks for the homepage's domain to be verified by the publishing account — local unpacked loading is unaffected.
+
+Manifest permissions cannot be split per browser — there is no `browser_specific_settings` override for `permissions`, so Chrome and Firefox read the same array. The homepage key above is the one exception to "one manifest", and it earns it by being unshareable rather than merely convenient; keep the fork to that key.
 
 ## Firefox Compatibility
 
@@ -192,8 +198,19 @@ Chrome:
 Firefox:
 
 1. Open `about:debugging#/runtime/this-firefox`.
-2. "Load Temporary Add-on…" → pick `manifest.json`.
+2. "Load Temporary Add-on…" → pick `dist-firefox.xpi`, or `manifest.json` to inspect the page alone.
 3. Re-load after each change (temporary add-ons don't persist).
+
+Picking `manifest.json` loads the directory, which is the shared, Chrome-safe manifest — so that session has no homepage override. Only the xpi carries `manifest.firefox.json`.
+
+## Packaging
+
+`python .workbuddy/make_dist.py` writes both artifacts and verifies them in the same run:
+
+- `dist-chromium.zip` — `git archive HEAD` exactly as it stands, for Chrome's "Load unpacked".
+- `dist-firefox.xpi` — the same tree with `manifest.firefox.json` swapped in for `manifest.json`.
+
+The swap goes through a throwaway index (`GIT_INDEX_FILE=…`), so the real index is untouched and both files stay native `git archive` output: same line endings, same entry set. Do not hand-edit a manifest inside either archive, and do not re-zip one — regenerate instead. Both are gitignored. The verifier fails if either artifact ships `manifest.firefox.json` or `.gitattributes`, if the xpi has no homepage override, if the shipping manifest has one, if the two manifests differ by anything other than that key, or if a text entry came out CRLF.
 
 ## Editing Conventions
 

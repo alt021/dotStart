@@ -1,0 +1,5 @@
+# manifest.firefox.json is a packaging INPUT, not an extension file: the build
+# swaps it in for manifest.json inside dist-firefox.xpi, and it must never ride
+# along as a stray file in either artifact. See AGENTS.md, "Two manifests".
+manifest.firefox.json export-ignore
+.gitattributes export-ignore

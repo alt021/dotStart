@@ -12,13 +12,13 @@ A minimalist new tab page with a real-time clock, multi-engine search box, confi
 - **Language**: HTML / CSS / vanilla JavaScript (ES2020 module)
 - **No build step** — `src/newtab.js` is the human-edited source. Do not introduce npm/bundlers.
 - **i18n**: `_locales/<locale>/messages.json` for extension metadata (`extName`, `extDescription`, and `actionTitle` for the toolbar button); in-app UI strings live in the `I18N` and `ONBOARDING_I18N` constants inside `src/newtab.js`. The popup is a second document that cannot reach those constants, so `src/popup.js` carries its own `POPUP_I18N` table — see the Custom CSS section for how the two are held in step.
-- **Manifest**: `chrome_url_overrides.newtab` → `newtab.html`; `action.default_popup` → `popup.html`
+- **Manifest**: `chrome_url_overrides.newtab` → `newtab.html` (new tabs); `chrome_settings_overrides.homepage` → the same file (the homepage, for Firefox users who open the browser onto it); `action.default_popup` → `popup.html`
 
 ## Key Files
 
 | File | Role |
 | --- | --- |
-| `manifest.json` | MV3 manifest. References `newtab.html`, the toolbar `action` (`popup.html`) and the five icon files (16/48/96/128/256). No permission was added for the popup. |
+| `manifest.json` | MV3 manifest. References `newtab.html` (both as the new tab override and as the homepage override), the toolbar `action` (`popup.html`) and the five icon files (16/48/96/128/256). No permission was added for the popup, and none for the homepage override. |
 | `newtab.html` | Entry HTML; loads `./src/newtab.css` and `./src/newtab.js` as a module, and declares the favicon. |
 | `popup.html` | The toolbar button's popup. Loads `./src/popup.css` and `./src/popup.js`. No inline script (MV3 CSP). |
 | `src/popup.js` | The popup's whole behaviour: one button that removes the `customCSS` key. Carries its own two-language string table — see the Custom CSS section. |
@@ -169,6 +169,8 @@ The shortcuts row is back, but it needs no permission at all: entries are user-s
 The custom CSS sheet needs no permission and no CSP relaxation: a `<style>` element built with `createElement()` and filled through `textContent` is same-origin CSS, not inline script, and the MV3 default policy restricts `script-src` alone. Do not add a `content_security_policy` entry on its behalf.
 
 The toolbar `action` needs no permission either. The popup is an extension page — it shares the extension origin, so it reads and writes the very same `localStorage` this page uses, and it renders nothing but a button and a line of text. There is no `background` service worker and no message passing anywhere in this feature; do not add `storage`, `scripting`, `tabs` or a `background` entry for it. `test_settings.js` asserts the permission array is still exactly `["search"]` and that no `optional_permissions` / `background` / `content_scripts` block has appeared.
+
+The homepage override needs no permission either — but it is the one entry here that is **visible to the user and revocable by them**, so it is worth knowing what it does and does not do. `chrome_url_overrides.newtab` only covers new tabs; a Firefox user who opens the browser onto their homepage (or clicks the home button) still got the stock page, so `chrome_settings_overrides.homepage` points at the same bundled `newtab.html` — a path inside the package, never a remote URL, which is also what Firefox requires and what the tests assert. Firefox asks the user once, on first use, and the choice stays visible and revocable under Settings → Home; it is not a silent hijack. Two caveats live outside this repo: Chrome's store policy makes settings overrides inconsistent with its single-purpose policy when other permissions are present (this extension declares `search`), and asks for the homepage's domain to be verified by the publishing account — local unpacked loading is unaffected. And a homepage override only sticks for a properly installed add-on: a temporary load via `about:debugging` is gone at restart, homepage and all.
 
 Manifest permissions cannot be split per browser — there is no `browser_specific_settings` override for `permissions`, so Chrome and Firefox read the same array.
 

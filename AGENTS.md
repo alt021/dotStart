@@ -1,6 +1,6 @@
 # AGENTS.md — dotStart New Tab Extension
 
-Chrome MV3 extension that replaces the default new tab page. Designed for both Chrome and Firefox 109+.
+Chrome MV3 extension that replaces the default new tab page. Designed for both Chrome and Firefox 128+.
 
 ## Project Overview
 
@@ -8,7 +8,7 @@ A minimalist new tab page with a real-time clock, multi-engine search box, confi
 
 ## Tech Stack
 
-- **Runtime**: Chrome Extension MV3 (Firefox 109+ via `browser_specific_settings.gecko`)
+- **Runtime**: Chrome Extension MV3 (Firefox 128+ via `browser_specific_settings.gecko`)
 - **Language**: HTML / CSS / vanilla JavaScript (ES2020 module)
 - **No build step** — `src/newtab.js` is the human-edited source. Do not introduce npm/bundlers.
 - **i18n**: `_locales/<locale>/messages.json` for extension metadata (`extName`, `extDescription`, and `actionTitle` for the toolbar button); in-app UI strings live in the `I18N` and `ONBOARDING_I18N` constants inside `src/newtab.js`. The popup is a second document that cannot reach those constants, so `src/popup.js` carries its own `POPUP_I18N` table — see the Custom CSS section for how the two are held in step.
@@ -182,9 +182,13 @@ Manifest permissions cannot be split per browser — there is no `browser_specif
 
 ## Firefox Compatibility
 
-`browser_specific_settings.gecko.id = "dotstart@amexe2.github.io"` and `strict_min_version = "109.0"`. Code paths:
+`browser_specific_settings.gecko.id = "dotstart@amexe2.github.io"`, `strict_min_version = "128.0"` and `data_collection_permissions.required = ["none"]`. Code paths:
 
-- The "browser default" search engine is gated on **capability, not a browser sniff**: `defaultEngineAPI()` probes `chrome.search.query` and `browser.search.query` and returns the first that exists, `browser` first — Firefox publishes that namespace natively and only aliases it as `chrome`, and Chromium has no `browser` at all, so each browser ends up on its native form. Firefox has shipped `browser.search.query` since **111**, so Firefox users get the entry like everyone else — it used to be hidden behind `isFirefox()`, which silently made "跟随浏览器" unsettable there. Firefox 109/110 (the versions below its floor) have the `search` namespace *without* `query()`, which is exactly why the probe checks the method, not the namespace: `search()` then falls back to `google` instead of doing nothing at all. When a future feature needs `chrome://` pages or privileged `about:` URLs, remember that Firefox rejects **both** families in `tabs.create` and has no reachable equivalent — do not try to remap them.
+- The "browser default" search engine is gated on **capability, not a browser sniff**: `defaultEngineAPI()` probes `chrome.search.query` and `browser.search.query` and returns the first that exists, `browser` first — Firefox publishes that namespace natively and only aliases it as `chrome`, and Chromium has no `browser` at all, so each browser ends up on its native form. Firefox has shipped `browser.search.query` since **111**, so Firefox users get the entry like everyone else — it used to be hidden behind `isFirefox()`, which silently made "跟随浏览器" unsettable there. Firefox 109/110 have the `search` namespace *without* `query()`, which is exactly why the probe checks the method, not the namespace: `search()` then falls back to `google` instead of doing nothing at all. Those versions sit below the floor and cannot install the extension, so that fallback is defensive rather than reachable — keep it anyway, because it is the probe's own contract and the reason raising the floor stranded nothing. When a future feature needs `chrome://` pages or privileged `about:` URLs, remember that Firefox rejects **both** families in `tabs.create` and has no reachable equivalent — do not try to remap them.
+
+**The data-collection declaration and the version floor are one decision, not two.** AMO has required `browser_specific_settings.gecko.data_collection_permissions` for new submissions since 2025-11-03, and Firefox refuses to sign without it; `required` takes either the literal `"none"` or one or more data-type names, and `"none"` is the honest value here. It stays honest for a reason worth remembering: the extension transmits nothing, its only `fetch` reads the bundled `LICENSE` back through `runtime.getURL()`, and `search` hands the query to the browser's own engine rather than to a server. The key lives in the **shared** manifest rather than a third variant, because `browser_specific_settings` is a Gecko-only namespace and Chrome ignores it whole — so it is not a second thing for the two browsers to disagree about, and the two manifests still differ by the homepage key alone.
+
+The floor moved with it, `109.0` → `128.0`, and that half is the easy one to get wrong: Firefox 127 and below do not ignore this key, they **error** on it, so declaring it under the old floor would have traded "no declaration" for "will not install at all" on every version older than the key. The floor above those versions turns a hard error into a plain "not supported". No code changed for the bump. `test_settings.js` asserts the key, the floor, and the two together, since editing one without the other is the mistake worth catching.
 
 ## Loading the Extension
 

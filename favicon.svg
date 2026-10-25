@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <!-- dotStart: a square page with a red period in it. The ink follows the
+       browser/OS colour scheme, never the page's data-theme, because the tab
+       strip does not read the page at all. Light ink #000, dark ink #fff,
+       matching the page's foreground colour; the accent is red in both.
+       Regenerate with .workbuddy/make_icon.py. -->
+  <style>
+    .ink {
+      fill: none;
+      stroke: #000;
+    }
+    @media (prefers-color-scheme: dark) {
+      .ink {
+        stroke: #fff;
+      }
+    }
+  </style>
+  <rect class="ink" x="48" y="48" width="160" height="160" stroke-width="26"/>
+  <circle cx="128" cy="128" r="35" fill="#e5342a"/>
+</svg>

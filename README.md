@@ -1,7 +1,7 @@
-<p align="center">
+<p align="left">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/logo-dark.svg">
-    <img src="docs/logo.svg" alt="dotStart" width="360">
+    <img src="docs/logo.svg" alt="dotStart" width="220">
   </picture>
 </p>
 

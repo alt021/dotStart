@@ -1,255 +1,440 @@
-# AGENTS.md — dotStart New Tab Extension
+# AGENTS.md — dotStart
 
-Chrome MV3 extension that replaces the default new tab page. Designed for both Chrome and Firefox 128+.
+A Chrome MV3 / Firefox 128+ extension that replaces the new tab page (and, on Firefox, the homepage). Vanilla HTML/CSS/ES2020, **no build step**. ~1755 lines of JS, ~1150 of CSS, ~390 assertions of smoke tests.
 
-## Project Overview
+**This file is the project's working memory.** It is written to be read top to bottom once at the start of a session and then used as a lookup. Everything that costs an agent a *round trip* to discover — file roles, invariants, traps, the test harness — is here on purpose, because rediscovering it is the expensive part. Last full revision 2026-10-02.
 
-A minimalist new tab page with a real-time clock, multi-engine search box, configurable background (blank / dot grid / stripes), auto/light/dark theme, up to four user-defined shortcuts in a bottom row, a right-click bottom-sheet settings panel, first-run onboarding, a user-written stylesheet, a toolbar button that clears that stylesheet, and an Easter egg screen.
+**Written to be tool-agnostic.** It describes the project and this workstation, not any particular assistant. Vendor-specific features, and anything that only exists inside one agent product, are deliberately kept out — a different agent, or a plain editor session, should get the same value from it. Where a local quirk is unavoidable it is labelled as such and confined to §8.3.
 
-## Tech Stack
+> **How to use it.** §1 is the map: read it and you can navigate the repo without opening anything. §2–§4 are what you must not break. §5 is the test harness you will run constantly. §6 is the extension's own model. §7 is the packaging/loading loop. §8 is where the details live — read the subsection for whatever you touch, and only that subsection.
 
-- **Runtime**: Chrome Extension MV3 (Firefox 128+ via `browser_specific_settings.gecko`)
-- **Language**: HTML / CSS / vanilla JavaScript (ES2020 module)
-- **No build step** — `src/newtab.js` is the human-edited source. Do not introduce npm/bundlers.
-- **i18n**: `_locales/<locale>/messages.json` for extension metadata (`extName`, `extDescription`, and `actionTitle` for the toolbar button); in-app UI strings live in the `I18N` and `ONBOARDING_I18N` constants inside `src/newtab.js`. The popup is a second document that cannot reach those constants, so `src/popup.js` carries its own `POPUP_I18N` table — see the Custom CSS section for how the two are held in step.
-- **Manifest**: `chrome_url_overrides.newtab` → `newtab.html` (new tabs); `action.default_popup` → `popup.html`. `chrome_settings_overrides` is deliberately **absent** here — Chrome refuses to load the extension if it carries a homepage it cannot use — and lives in `manifest.firefox.json`, a second manifest the build swaps in for the xpi. See "Permissions" and "Packaging".
+---
 
-## Key Files
+## 1. Orientation
 
-| File | Role |
+### 1.1 The shape of the thing
+
+One extension, two manifests, two HTML documents, four source files that matter:
+
+```
+manifest.json ──▶ newtab.html ──▶ src/newtab.css + src/newtab.js   (the new tab page — 95% of the code)
+              └─▶ popup.html  ──▶ src/popup.css  + src/popup.js    (the toolbar button — 52 lines)
+```
+
+`newtab.js` is a **single ES module with no exports** — top-level `function` / `const` declarations are the entire architecture, and there is no import graph to follow. That is deliberate (no bundler), and it is why the whole page is testable by evaluating the file's text in a stub environment (§5.1).
+
+### 1.2 Key Files
+
+| Path | Role |
 | --- | --- |
-| `manifest.json` | MV3 manifest, and the one Chrome loads. References `newtab.html` as the new tab override, the toolbar `action` (`popup.html`) and the five icon files (16/48/96/128/256). No permission was added for the popup, and `chrome_settings_overrides` must stay out of it — see the Permissions section. |
-| `manifest.firefox.json` | The same manifest plus `chrome_settings_overrides.homepage`. A packaging **input**, not an extension file: `make_dist.py` swaps it in for the xpi, and `.gitattributes` keeps it out of both artifacts. `test_settings.js` asserts the two differ by that key alone. |
-| `.gitattributes` | One job: `export-ignore` for the two files above, so `git archive` never ships them. |
-| `newtab.html` | Entry HTML; loads `./src/newtab.css` and `./src/newtab.js` as a module, and declares the favicon. |
-| `popup.html` | The toolbar button's popup. Loads `./src/popup.css` and `./src/popup.js`. No inline script (MV3 CSP). |
-| `src/popup.js` | The popup's whole behaviour: one button that removes the `customCSS` key. Carries its own two-language string table — see the Custom CSS section. |
-| `src/popup.css` | The popup's own stylesheet, deliberately not `newtab.css` (whose `body` is `min-height: 100vh` + flex centring). Restates the four tokens it reads; `test_settings.js` holds them byte-identical to `newtab.css`. |
-| `src/newtab.js` | All runtime logic — see module breakdown below. ~1730 lines. |
-| `src/newtab.css` | Styles. CSS variables for light/dark theme in `:root` and `[data-theme="dark"]`; the Font Awesome subset `@font-face` and the `.fa-*` rules live at the end. |
-| `src/fa-solid-900-subset.woff2` | Font Awesome 7.3.1 Free **Solid**, subset to the 18 glyphs the page uses (119 KB → 2.5 KB). Regenerate with `.workbuddy/fa_subset.py` after editing its `ICONS` list, then add the printed codepoint as a `.fa-<name>` rule in `newtab.css`. The script also stamps `?v=<sha256-prefix>` onto the font url — see the icon conventions below for why that tail is load-bearing. |
-| `src/fa-solid-900-subset.LICENSE.txt` | Upstream Font Awesome Free licence (icons CC BY 4.0, fonts SIL OFL 1.1). Must ship with the font — do not delete. |
-| `_locales/en/messages.json` | `extDescription` for the Chrome Web Store listing. |
-| `_locales/zh_CN/messages.json` | Same, Chinese translation. |
-| `icon-16.png` / `icon-48.png` / `icon-96.png` / `icon-128.png` / `icon-256(→icon.png)` | Extension icons. |
-| `house-regular-full.svg` | Tab favicon, declared in `newtab.html`. Font Awesome 7.3.1 `house` (regular), recoloured to be theme-aware — see the note below. Keep the Font Awesome attribution comment. |
-| `scrshot-light.png` / `scrshot-dark.png` | Onboarding step 3 preview, one per theme (currently 700×385 and 601×390 — the pair deliberately does **not** share an aspect ratio; see the onboarding note below for why that is safe). Shot from the real settings panel, then quantised with Pillow (`convert("RGB").quantize(method=Image.Quantize.FASTOCTREE, colors=256)`, which takes them to about 9 KB each). |
-| `LICENSE` | MIT license. Fetched at runtime by the onboarding screen; edit here only. |
-| `EASTER.MD` | **Editing working copy only — not read at runtime.** Source of truth for humans; the shipped text is the hard-coded `EASTER_CONTENT` constant in `src/newtab.js`. Change one, change the other. |
-| `ASSET_AUDIT.md` | Asset review report + remaining cleanup backlog. |
-| `AGENTS.md` / `README.md` | Documentation. |
+| `manifest.json` | MV3 manifest, **and the one Chrome loads**. Declares `chrome_url_overrides.newtab`, the toolbar `action` (`popup.html`), five icons, and the only permission (`search`). Must **never** carry `chrome_settings_overrides` — Chrome refuses to load the whole extension. |
+| `manifest.firefox.json` | The same manifest **plus** `chrome_settings_overrides.homepage`. A packaging *input*, not an extension file. Kept out of both artifacts by `.gitattributes`. |
+| `.gitattributes` | One job: `export-ignore` on the two files above, so `git archive` never ships them. |
+| `newtab.html` | Entry document. Loads `src/newtab.css` + `src/newtab.js` (as a module) and declares the favicon. |
+| `popup.html` | The toolbar popup's document. Loads `src/popup.css` + `src/popup.js`. No inline script (MV3 CSP). |
+| `src/newtab.js` | **All runtime logic.** Sections below are indexed by function name — `grep -n "^function \|^async function \|^const [A-Z]" src/newtab.js` is the whole table of contents. |
+| `src/newtab.css` | All page styles. Theme tokens in `:root` / `[data-theme="dark"]`; the Font Awesome `@font-face` and `.fa-*` rules sit at the very end. |
+| `src/popup.js` | The popup's whole behaviour: one button that removes the `customCSS` key. Carries its own two-language `POPUP_I18N` table because it cannot import `newtab.js`. |
+| `src/popup.css` | The popup's own sheet, deliberately **not** `newtab.css` (whose `body` is `100vh` + flex centring). Restates the four tokens it reads; a test holds them byte-identical to `newtab.css`. |
+| `src/fa-solid-900-subset.woff2` | Font Awesome 7.3.1 Free Solid, subset to the icons the page uses (119 KB → 2.5 KB). Regenerated by a script that also stamps the `?v=<hash>` cache-buster — see §4.4. |
+| `src/fa-solid-900-subset.LICENSE.txt` | Upstream Font Awesome licence (OFL). Must ship with the font. |
+| `_locales/en/messages.json`, `_locales/zh_CN/messages.json` | Manifest-level strings only: `extName`, `extDescription`, `actionTitle`. In-app strings live in `I18N` inside `newtab.js`. |
+| `icon-16/48/96/128.png`, `icon.png` (256) | Extension icons. Square PNGs, all five registered in `manifest.json.icons`. The favicon's mark on a black tile — a PNG cannot follow the toolbar's theme (§4.5). |
+| `favicon.svg` | Tab favicon: a square page with a red period. Theme-aware **inside the file** via `@media (prefers-color-scheme: dark)`. Generated together with the PNGs by `.workbuddy/make_icon.py`; edit the numbers there, not here. |
+| `scrshot-light.png`, `scrshot-dark.png` | Onboarding step-3 previews, one per theme, ~9 KB each (quantised, FASTOCTREE/256). Deliberately do **not** share an aspect ratio — see §4.5. |
+| `LICENSE` | MIT. Read at runtime by the onboarding screen through `loadLicenseText()`. |
+| `EASTER.MD` | Human-editable **working copy only, never read at runtime**. The shipped text is the hard-coded `EASTER_CONTENT` constant. Change one, change the other. |
+| `README.md` | User-facing install + features (Chinese). |
+| `ASSET_AUDIT.md` | Historical asset review; the state table is the part still worth reading. |
+| `.workbuddy/` | **Local scratch, gitignored.** Test suite, helper scripts, project notes. Never ships, never committed — but part of the project, since it holds the only test coverage and the build script. See §5 and §8.1. |
 
-## Runtime Modules (in `src/newtab.js`)
+### 1.3 `src/newtab.js` — module map
 
-The script is a single ES module. Top-level `function` and `const` declarations form the architecture:
+Read this instead of skimming 1755 lines. Line numbers are approximate; function names are exact.
 
-1. **Constants** — `STORAGE_KEYS`, `SEARCH_URLS`, `SEARCH_ENGINES`, `SEARCH_STYLES`, `SEARCH_LIMITS`, `SHORTCUT_MAX` / `SHORTCUT_WEIGHT` / `SHORTCUT_TITLE_MAX`, `I18N` (en/zh UI strings), `ONBOARDING_I18N` (en/zh onboarding HTML), regex constants.
-2. **Storage** — `t(key)`, `fmt(str, vars)` (fills `{min}`-style slots), `getStored(key, valid, fallback)`, `setStored(key, value)`, `readLimit(key, spec)` / `isValidLimit(n, spec)` for the numeric settings, `escapeHTML(str)`, the shortcut model (`normalizeURL`, `isValidWeight`, `sanitizeShortcut`, `sortShortcuts`, `readShortcuts`, `writeShortcuts`, `saveShortcut`, `deleteShortcut`), the custom CSS sheet (`readCustomCSS`, `customCSSEnabled`, `writeCustomCSS`, `updateCustomCSS`, `confirmCustomCSSDialog`, and the first-switch-on gate `openCSSGateStage` / `confirmCSSGate` / `stopCSSGateCountdown`), and `migrateLegacySettings()` (idempotent migrations: the legacy `showDots` key, and the renamed search box styles). All persistence is `localStorage`.
-3. **Detection** — `detectBrowserLang()` reads `navigator.language`; `defaultEngineAPI()` returns the namespace that can query the browser's *own* default search engine (`chrome.search` on Chromium 87+, `browser.search` on Firefox 111+), or `null` where there is none.
-4. **Theming** — `applyTheme()`, `updateUI()` (master rerender).
-5. **UI updates** — one `update*()` function per persisted option: `updatePrompt`, `updateTime`, `updateDots`, `updateClickFx`, `updateGo`, `updateSearchStyle`, `updateCustomCSS`, `updatePlaceholder`, `updateShortcuts`. `updateUI()` calls them in the right order.
-6. **Search** — `isURL(text)`, `openURL(text)`, `search(query)`. The `browser` engine is handed to `defaultEngineAPI()` as `api.query({ text })`, so the browser's own default engine answers it on both Chromium and Firefox 111+; `engineOptions()` offers that entry only where the probe succeeds and `search()` falls back to `google` where it does not.
-7. **Settings panel & onboarding** — `getSettingsItems(tab)` is the single source of truth for the panel: each setting is one entry (`action`, `icon`, `labelKey`, `kind`, `key`, `fallback`, and for the value kinds an `options` list of `[value, labelKey]`). `cardHTML()` renders one card (icon / name / current status), `getSettingsContentHTML()` the whole strip, and `renderSettingsPanel()` / `openSettingsPanel()` / `closeSettingsPanel()` / `openSettingsDialog()` / `closeSettingsDialog()` drive the UI. Tabs: `appearance` / `searchBoxTab` / `shortcutsTab` (the shortcut manager) / `advanced`. Kinds: `"toggle"` flips a boolean in place, `"cycle"` steps to its other option in place (`cycleCurrent()`), `"select"`, `"number"`, `"shortcut"` and `"css"` open a dialog (a value list, a single field, the three-field shortcut form, or the custom CSS textarea), `"disabled"` is inert. A setting with exactly two options is **always** a `cycle` — a menu for two choices is a needless extra step — and `test_settings.js` enforces both halves of that rule (every `cycle` has 2 options, every `select` has ≥3). `getSettingsItems()` is no longer a pure function of the tab: the Search Box tab reads the *current* `searchStyle` and inserts the numeric settings (radius only for `modern`; border weight, box length and transparency for both) between the style selector and the Search button, so a style switch adds or removes tiles, and the Shortcuts tab builds one tile per stored shortcut plus the add tile. A card therefore carries either a static `labelKey` or a runtime `name` (a shortcut's own title — escaped by `cardHTML()`), and either a computed `itemStatus()` or a literal `statusText`; `disabled` is normally the `"disabled"` kind, while the add tile is disabled at runtime once the cap is reached. `applySetting(action, value)` performs the write plus the matching `update*()`. Dismissal: the panel collapses on a right-click (which toggles it) or on a click outside it, and on nothing else — `Esc` closes the dialog only (`closeSettingsDialog()`, the single exit, which also stops the countdown and tears the gate down). A `storage` listener on `window` reruns `updateCustomCSS()` + `renderSettingsPanel()` when the `customCSS` key changes, which is how the toolbar popup rescues a page that is already open — see the Custom CSS section. Containment is sampled in the **capture** phase (a `capture: true` listener on `document` sets `clickStartedInside`), never re-tested in the bubble-phase listener, because handlers mutate the DOM in between: flipping a card calls `renderSettingsPanel()`, which rewrites `.settings-content` and detaches the clicked element, so a later `settingsPanelEl.contains(e.target)` would answer "outside" and close the panel on every flip. A dialog click must also count as inside — the dialog is a *sibling* of the panel, not a child (both are children of `<body>`), so picking a dialog option would otherwise tear the panel down too. `showOnboarding()` (async) runs the multi-step first-run flow and pulls the MIT text via `loadLicenseText()`.
-8. **Easter egg** — `showEasterEgg()`, triggered by clicking the empty search box 7 times. Renders the hard-coded `EASTER_CONTENT` constant (`{{version}}` → `getRuntimeVersion()`), one line per `<div>`, one blank line per `<br>`. After measuring the rendered content it sets the animation duration to `(content height + viewport) / EASTER_CRAWL_SPEED` so the crawl holds 150 px/s and loops the moment the last line clears the screen.
+| # | Block | Key names | Notes |
+| --- | --- | --- | --- |
+| 1 | **Constants** (`:1–196`) | `STORAGE_KEYS`, `SEARCH_URLS`, `SEARCH_ENGINES`, `SEARCH_STYLES`, `LEGACY_SEARCH_STYLES`, `SEARCH_LIMITS`, `SHORTCUT_MAX`, `SHORTCUT_WEIGHT`, `SHORTCUT_TITLE_MAX`, `I18N`, `ONBOARDING_I18N` | `I18N` holds **128 keys × 2 languages**. `SEARCH_LIMITS` is the single source of truth for every numeric range and default (§6.2). |
+| 2 | **Storage & migration** (`:197–226`) | `t`, `fmt`, `getStored`, `setStored`, `migrateLegacySettings` | Everything persists to **`localStorage`** — there is no `chrome.storage` anywhere. |
+| 3 | **Detection** (`:227–261`) | `detectBrowserLang`, `defaultEngineAPI`, `applyDocumentLang`, `getLang` | `defaultEngineAPI()` probes **the method**, not the namespace (§4.3). |
+| 4 | **Theming & core UI updates** (`:262–354`) | `applyTheme`, `updatePrompt`, `updateTime`, `updateDots`, `updateClickFx`, `onMouseDown`, `updateGo`, `updateShortcuts` | One `update*()` per persisted option. |
+| 5 | **Search box sizing** (`:355–412`) | `isValidLimit`, `readLimit`, `styleValue`, `updateSearchStyle` | Publishes CSS custom properties **on `document.documentElement`** (§6.2). |
+| 6 | **Custom CSS sheet** (`:413–466`) | `readCustomCSS`, `customCSSEnabled`, `writeCustomCSS`, `updateCustomCSS`, `escapeHTML` | Injection is `textContent` into a `<style>` appended to `<head>` (§6.3). |
+| 7 | **Shortcut model** (`:467–549`) | `normalizeURL`, `isValidWeight`, `sanitizeShortcut`, `sortShortcuts`, `readShortcuts`, `writeShortcuts`, `saveShortcut`, `deleteShortcut` | `normalizeURL()` is the only XSS defence in the project (§6.4). |
+| 8 | **LICENSE / Easter egg** (`:550–706`) | `loadLicenseText`, `EASTER_CONTENT`, `EASTER_CRAWL_SPEED`, `getRuntimeVersion`, `showOnboarding` | The **only `fetch` in the codebase** reads the bundled `LICENSE` via `runtime.getURL()`. |
+| 9 | **Rendering** (`:786–851`) | `updatePlaceholder`, `updateUI` (master rerender), `isURL`, `openURL`, `search` | `updateUI()` calls the `update*()` functions in a fixed order. |
+| 10 | **Settings model** (`:852–1006`) | `SETTINGS_TABS`, `CSS_GATE_SECONDS`, `cssGateAcked`, `engineOptions`, `getSettingsItems`, `itemValue`, `itemValues`, `itemStatus`, `cardHTML`, `findSettingsItem`, `getSettingsContentHTML` | `getSettingsItems()/cardHTML()` are **pure** — the tests assert on their output with no DOM (§5.2). |
+| 11 | **Panel & dialog** (`:1007–1186`) | `renderSettingsPanel`, `openSettingsPanel`, `closeSettingsPanel`, `settingsPanelVisible`, `numberHint`, `weightHint`, `flagDialogError`, `openSettingsDialog` | `openSettingsDialog()` is the router: it branches on `kind` and on the gate (§6.5). |
+| 12 | **Dialog confirms** (`:1187–1379`) | `confirmNumberSetting`, `confirmCustomCSSDialog`, `cssGateLabel`, `openCSSGateStage`, `startCSSGateCountdown`, `stopCSSGateCountdown`, `confirmCSSGate`, `confirmShortcutDialog`, `confirmDeleteShortcut`, `closeSettingsDialog`, `settingsDialogVisible` | `closeSettingsDialog()` is the single exit for every way out (§6.5). |
+| 13 | **Dispatch** (`:1381–1463`) | `applySetting`, `toggleCurrent`, `cycleCurrent` | `applySetting(action, value)` = the write + the matching `update*()`. |
+| 14 | **Boot** (`:1464–1755`) | `DOMContentLoaded` listener, `storage` listener, wheel handler, click handler | Three listeners are registered at the bottom; nothing runs before `DOMContentLoaded`. |
 
-Shared helpers: `loadLicenseText()` reads the bundled `LICENSE` through `chrome.runtime.getURL()` and caches it; `getRuntimeVersion()` wraps `chrome.runtime.getManifest().version`.
+### 1.4 Storage keys (`STORAGE_KEYS`)
 
-`DOMContentLoaded` registers the initial paint. Settings changes call `setStored` then `updateUI`.
-
-## Storage Keys (`STORAGE_KEYS`)
-
-| Key | Default | Description |
+| Key | Default | Values / notes |
 | --- | --- | --- |
 | `theme` | `auto` | `auto` / `light` / `dark` |
 | `lang` | `en` | `en` / `zh` |
-| `showTitle` | `true` | Show search box title |
-| `showTime` | `true` | Show clock |
-| `showGo` | `true` | Show search button |
+| `showTitle` | `true` | Show the search box title |
+| `showTime` | `true` | Show the clock |
+| `showGo` | `true` | Show the search (Go) button |
 | `clockFormat` | `24h` | `12h` / `24h` |
 | `searchEngine` | `browser` | `browser` / `google` / `duckduckgo` / `qwant` / `bing` / `baidu` |
 | `searchStyle` | `modern` | `modern` (boxed) / `geek` (underline) |
-| `searchRadius` | `8` | Corner radius in px, `modern` only. Accepts `1`–`60`, or `0` for the default |
-| `searchBorder` | `1` | Border weight in px, both styles. Accepts `1`–`10`, or `0` for the default |
-| `searchLength` | `500` | Search box width in px, both styles. Accepts `200`–`1200`, or `0` for the default |
-| `searchTransparency` | `0` | How see-through the whole box is, in percent, both styles. Accepts `1`–`100`, or `0` for the default |
+| `searchRadius` | `8` | px, **`modern` only**. 1–60, or `0` = default |
+| `searchBorder` | `1` | px, both styles. 1–10, or `0` = default |
+| `searchLength` | `500` | px, both styles. 200–1200, or `0` = default |
+| `searchTransparency` | `0` | %, both styles. 1–100, or `0` = default. **The one setting whose default is `0` itself** |
 | `backgroundStyle` | `blank` | `blank` / `dots` / `stripes` |
-| `showClickFx` | `true` | Click ripple effect |
-| `shortcuts` | `[]` | JSON array of at most 4 `{ title, url, weight }` objects. Not a scalar like the rest — see the Shortcuts section |
-| `customCSS` | *(absent)* | A user-written stylesheet, injected as the last `<style>` in `<head>`. **Absent means off** — there is no "empty string" state, because `writeCustomCSS()` removes the key when the field is blank. See the Custom CSS section |
-| `cssGateAck` | *(absent)* | `"true"` once the custom CSS gate's confirm has been pressed. Absent means the gate still stands. Permanent by design — nothing ever resets it (not the popup rescue, not switching the sheet off). See the Custom CSS section |
+| `showClickFx` | `true` | Click ripple |
+| `shortcuts` | `[]` | JSON array, ≤4 `{title, url, weight}` — the only non-scalar key (§6.4) |
+| `customCSS` | *(absent)* | The user's stylesheet. **Absent means off** — there is no empty-string state (§6.3) |
+| `cssGateAck` | *(absent)* | `"true"` once the gate's confirm was pressed. Permanent by design (§6.5) |
 
-> Legacy: versions before v2.1.0 wrote a boolean `showDots` key instead of `backgroundStyle`. `migrateLegacySettings()` runs once at startup, converts `showDots: "true"` into `backgroundStyle: "dots"`, then deletes the old key. New code must not read `showDots`.
->
-> Legacy: the search box styles were renamed — `square` and `rounded` both became `modern`, the underline `line` became `geek`. The same function maps them through `LEGACY_SEARCH_STYLES`. Remapping matters rather than letting `getStored()` fall back: an unknown value would silently promote every underline user to the boxed style. Both migrations are idempotent, so they run unconditionally on load.
+> **Two legacy migrations run unconditionally at boot** (`migrateLegacySettings()`, idempotent):
+> ① a boolean `showDots` (pre-2.1.0) becomes `backgroundStyle: "dots"`, then the old key is deleted — **new code must not read `showDots`**;
+> ② the search box styles were renamed (`square`/`rounded` → `modern`, `line` → `geek`) via `LEGACY_SEARCH_STYLES`. Remapping rather than letting `getStored()` fall back matters: an unknown value would silently promote every underline user to the boxed style.
 
-## Search Box Styles
+### 1.5 Hard constraints
 
-Two styles, and the sizes are `localStorage` numbers applied by `updateSearchStyle()` as custom properties **on `document.documentElement`** (not on the form — see below):
+Non-negotiable. A change that breaks one of these will fail the suite, fail to load, or both.
+
+1. **No build step, ever.** `src/newtab.js` is loaded by the browser as-is. Do not add npm, a bundler, a `dist/` for source, or an import.
+2. **No `\uXXXX` escapes.** Write Chinese as real characters. (The old bundler output was already stripped; don't reintroduce it.)
+3. **All user-visible strings go in `I18N` / `ONBOARDING_I18N`, `en` + `zh` in parallel.** Read via `t(key)`. The popup is a separate document and needs its own copy.
+4. **`manifest.json` carries no `chrome_settings_overrides`** — that key lives in `manifest.firefox.json` only (§7.2).
+5. **Permissions stay exactly `["search"]`.** No `optional_permissions`, no `host_permissions`, no `tabs`, no `background`, no `content_scripts` (§6.6).
+6. **`newtab.css` must contain no `!important`.** Custom-CSS precedence depends entirely on document order (§6.3).
+7. **Version lives in `manifest.json` only.** Read it through `getRuntimeVersion()`, never hard-code it in source or in `EASTER.MD` (which uses a `{{version}}` placeholder).
+
+---
+
+## 2. Where to change what
+
+The single most expensive mistake is editing the wrong file, or editing both when only one should move. This table is the answer.
+
+| I want to… | Change | Then also |
+| --- | --- | --- |
+| Add / rename / remove a setting | `getSettingsItems()` (`src/newtab.js`), plus a case in `applySetting()`, plus an `update*()` if it touches the DOM, plus the key in `STORAGE_KEYS`, plus `I18N` en+zh | run `test_settings.js` — the item-model and kind assertions are strict |
+| Change a numeric range or default | `SEARCH_LIMITS` **only** | check the `var(--x, fallback)` in `newtab.css` still matches (§6.2) |
+| Change a user-facing string | `I18N` (and `ONBOARDING_I18N` if it's onboarding) — **both** languages | if it's `actionTitle`, also `_locales/*/messages.json` **and** `POPUP_I18N` in `src/popup.js` |
+| Change manifest metadata (name/description/version) | `manifest.json` + `_locales/*/messages.json` | version is read via `getRuntimeVersion()`; nothing else should be edited |
+| Change packaging / the homepage override | `manifest.firefox.json` + `.gitattributes` + `make_dist.py` | never add the key to the shared manifest (§7.2) |
+| Add a settings icon | `fa_subset.py`'s `ICONS` list (in `.workbuddy/`) | re-run it (rewrites the `?v=` cache-buster), paste the printed codepoint as a `.fa-<name>` rule, then run `fa_verify.py` (§4.4) |
+| Restyle the panel / tiles / dialog | `src/newtab.css` | geometry and contrast assertions in `test_settings.js` are specific (§4.5) |
+| Change the custom CSS gate | `openSettingsDialog` → `openCSSGateStage` → `confirmCSSGate` (`src/newtab.js`) | §6.5 is a long list of deliberate decisions — read it first |
+| Bump the Firefox floor | `strict_min_version` in **both** manifests | `data_collection_permissions` and the floor are one decision (§4.3) |
+| Work on the popup | `src/popup.js` + `src/popup.css` | the cross-file sync assertions in §5.3 will fail if the strings drift |
+| Change the brand mark / favicon / icons | geometry constants in `.workbuddy/make_icon.py` | re-run it — it rewrites `favicon.svg` **and** all five PNGs, so the two can never drift (§4.5) |
+| Change the Easter egg | `EASTER.MD` **and** `EASTER_CONTENT` in `newtab.js`, byte for byte | do not add HTML comments to the constant |
+
+---
+
+## 3. Traps that cost a round trip
+
+Each of these has actually bitten. They are ordered by how often they recur.
+
+- **`git checkout -- <file>` will destroy uncommitted work.** The normal state of this repo is "a batch of edits, not yet committed". A patch-and-restore cycle that uses `git checkout` reverts to HEAD and silently takes your real changes with it. **Back up first (`cp <file> <scratch>/bak/`) and restore with `cp`.**
+- **Never assume a file write landed — check it.** A tool can report success while the file is absent or truncated. After writing a tracked file, confirm with `ls`; before reporting work as done, confirm with `git status`. If the file is gone but was committed, `git show HEAD:<file>` brings it back.
+- **Multiple edits to one file in a single message can overwrite each other and still report success.** Send one edit at a time and verify after each.
+- **The working tree is CRLF, the repo is LF** (system `core.autocrlf=true`). Anchor-based string replacement in a throwaway `node -e` must write `\r?\n`, not `\n`, or it silently matches nothing. A proper edit tool is unaffected, and `neg_check.js` already normalises line endings for you.
+- **Never use a backtick inside `test_settings.js`'s `makeBootedEnv` export block.** That block lives inside a template literal, so a backtick (even in a comment) ends the string early and throws `SyntaxError`.
+- **`makeEnv()` never fires `DOMContentLoaded`.** Only `makeBootedEnv()` does. Any assertion about a dialog must use the booted harness.
+- **An assertion must fail for the *right* reason.** Guard property reads that could vanish (`children[0] || {}`) — an unguarded read turns a failed assertion into a thrown exception that swallows every check after it, which reads as "nothing failed".
+- **`(NOT CAUGHT)` in `neg_check.js` usually means the mutation missed, not that the assertion is weak.** Three known false alarms: the anchor wasn't unique (`String.replace` only hits the first match), the mutation produced invalid JS (parse fails → zero FAILs), or the mutation crashed the assertion itself. Check the mutation before doubting the test.
+- **`asset_audit.py` reports false positives.** It is regex-based and cannot see class names built at runtime, so every `.fa-*` rule, `.settings-card*` and `.selected` shows up as "unused". For icon coverage use `fa_verify.py` (it cross-checks CSS rules, the font cmap and glyph outlines). Do not delete styles based on that report.
+- **This machine cannot load the extension.** Only Thorium (portable) and Firefox ESR are installed; Playwright has no usable browser. **UI behaviour cannot be verified automatically — it is verified by the user, manually.** Any reasoning that depends on untestable layout behaviour (flex shrinking, percentage-width resolution) should be rewritten into something deterministic instead of assumed.
+- **Shell environment can lose its PATH.** If `ls` / `grep` come back "not found", the shell was started without the usual environment — prepend the toolchain `bin` directories to `PATH` in the same command rather than concluding the tools are missing. See §8.3.
+- **A shell wrapper may kill a compound command mid-way.** One environment SIGTERMed `rm -f x && echo ok` after the first command, losing the rest silently. If a chained command half-finishes, split it into plain sequential commands and confirm with `ls`.
+
+---
+
+## 4. Conventions
+
+### 4.1 Language and text
+
+- Every user-visible string lives in `I18N` or `ONBOARDING_I18N` with parallel `en`/`zh` keys; `t(key)` reads it, `fmt(str, vars)` fills `{min}`-style slots.
+- `LICENSE` is a **file**, read by `loadLicenseText()` (cached). The Easter-egg text is the opposite: hard-coded in `EASTER_CONTENT` so the extension needs no loose data file.
+- `EASTER_CONTENT` is one **bilingual** text shared by all languages. Headings stay inline (`**# 仓库 Repository**`); taglines and release notes stack the two languages on separate lines so no line mixes zh and en. Blank lines are meaningful (each becomes a `<br>`) — they set the vertical rhythm. No HTML comments: they would be injected as-is.
+- The crawl runs at a fixed `EASTER_CRAWL_SPEED` (150 px/s); the duration is computed from the measured content height and the keyframe ends at `translateY(calc(-100% - 100vh))`. **Do not go back to a fixed duration or a fixed `-200%`** — that made speed depend on text length and left a blank screen each loop.
+
+### 4.2 UI structure
+
+- The bottom sheet is the **only** rounded surface of the settings UI (`border-radius: 8px 8px 0 0` on its top edge). Everything inside is right-angled — tiles, the value dialog, its close button, the `.menu-radio` marker. A matching rounded corner inside reads as a mistake.
+- A tile is a fixed square sized by the single token `--settings-tile`. The panel has **no** height of its own; `.settings-content` carries `min-height: calc(var(--settings-tile) + 2.25rem)` so every tab yields the same panel height. Retune via that token. If you change it, rescale `.settings-card-icon` / `-name` / `-status` with it.
+- The strip scrolls but shows no scrollbar (`scrollbar-width: none` + `::-webkit-scrollbar { display: none }`). Keep `overflow-x: auto` when hiding the bar — the wheel handler maps `deltaY` to `scrollLeft`.
+- Inside a tile there is **no** divider between the icon plate and the label, and the glyph sits ~6 px below the plate's centre (`padding-top: 0.75rem`; the glyph stays centred in the padding box, so the offset is half the padding). Do not "fix" this, and keep the plate's background — it is the only thing separating the two zones.
+- The dialog's option list follows the same rule: no rule between consecutive options; the `:hover` fill is the only thing marking the row. `test_settings.js` asserts no `.settings-dialog-option` rule declares a `border-top`/`border-bottom`.
+- `.settings-dialog-confirm:disabled` is declared **after** `:hover` on purpose (same specificity, later wins) so a locked button cannot light up.
+- `--warn` (#c0392b light, #ff6b6b in **both** dark blocks) is the palette's only non-monochrome token and has **exactly one reader**, asserted by count on the comment-stripped sheet. Do not add a second consumer.
+
+### 4.3 Browser compatibility
+
+- `browser_specific_settings.gecko` = `id: dotstart@amexe2.github.io`, `strict_min_version: "128.0"`, `data_collection_permissions.required: ["none"]`.
+- **The "browser default" search engine is gated on capability, not a browser sniff.** `defaultEngineAPI()` probes `browser.search.query` first, then `chrome.search.query`, and returns whichever exists — Firefox publishes `browser` natively (since **111**), Chromium only has `chrome`. Firefox 109/110 have the namespace *without* the method, which is exactly why the probe checks the method; `search()` then falls back to `google`. **Never gate a browser API on `isFirefox()` or a UA string.**
+- **The data-collection declaration and the version floor are one decision.** AMO requires `data_collection_permissions` (since 2025-11-03) and Firefox refuses to sign without it; `required` takes the literal `"none"` or data-type names, and `"none"` is honest here — the extension transmits nothing. But **Firefox 127 and below *error* on the key rather than ignoring it**, which is why the floor is `128.0`. Changing one without the other turns "no declaration" into "will not install". The key lives in the **shared** manifest (`browser_specific_settings` is a Gecko-only namespace Chrome ignores whole), so the two manifests still differ by the homepage key alone.
+- Firefox rejects `chrome://` and privileged `about:` URLs in `tabs.create` with no reachable equivalent — do not try to remap them.
+
+### 4.4 Icons
+
+- Icons are **Font Awesome Free (Solid)**, shipped as a local subset font. The extension is offline; a CDN `<link>` is never acceptable.
+- To add one: append its name to `ICONS` in `fa_subset.py` (`.workbuddy/`), re-run it, paste the printed codepoint as a `.fa-<name>` rule in `newtab.css`, then run `fa_verify.py`. The subsetter needs `fonttools[woff]` + `brotli`; see §8.3 for the interpreter this machine uses.
+- **Pick a glyph whose codepoint is in the PUA.** `fa-plus` is `U+002B` — a 2-digit ASCII escape — and every parser here matches **4–6 hex digits**, so it is silently skipped *everywhere*. `fa-square-plus` (`U+F0FE`) is the same idea in the PUA, and matches the panel's square tiles.
+- **The font url must keep its `?v=<hash>` tail.** Extension resources are cached by full url, so regenerating the `.woff2` without changing the url leaves newly added glyphs invisible — which looks like a broken `@font-face`, not a cache. `fa_subset.py` recomputes the SHA-256 tail automatically; **never hand-edit it**, and let `fa_verify.py` fail if it drifts.
+- Icon coverage is verified end to end: `fa_verify.py` collects names from both the `icon:` fields and literal `class="fa-solid fa-x"` templates, then checks each against the CSS rule, the font cmap, and — by drawing it through `BoundsPen` — that the glyph has contours. A blank tile cannot ship.
+
+### 4.5 Assets
+
+- Icons must be square PNGs registered in `manifest.json.icons`. Chrome Web Store requires 16/48/128; Firefox requires 48/96.
+- **The mark is a square page with a red period in it**, and it ships in two renderings of one geometry. `.workbuddy/make_icon.py` draws both, so they cannot drift; it **overwrites** `favicon.svg` and the five PNGs, so change the numbers there and never hand-edit the outputs.
+- The tab favicon is **theme-aware inside the SVG** (`@media (prefers-color-scheme: dark)`), matching `--fg`. Do not drive it from JS or `data-theme`: the tab strip follows the OS scheme, not the page's. Note Chrome suppresses favicons on the new tab page by design, so this is mostly visible in Firefox or when opening `newtab.html` directly.
+- **The PNGs are the same mark on a black tile with a white frame**, and that is not decoration. A toolbar icon is a bitmap, so it cannot follow the toolbar's theme: bare black ink vanishes on a dark toolbar and bare white ink vanishes on a light one. Tile + white frame carries both extremes in one file. Rewriting them back to transparent ink "for consistency with the favicon" breaks the icon in dark mode.
+- Only three colours are allowed: `#000`, `#fff`, and the accent `#e5342a`. The accent is a **brand** red, deliberately not `--warn` (#c0392b) — that token means "this can hurt you" and has exactly one reader (§4.2). At 16 px only the frame and the dot survive; a third element turns the toolbar icon into a smudge, which is why the tile version has nothing else on it.
+- Onboarding screenshots are **framed by CSS, not by their own dimensions**. `.onboarding-img` is a flex item inside the flex-column `.onboarding-col`, so its *box height* comes from whatever the title and subtitle leave over — identical in both themes, which is what stops a theme flip from reflowing the panel. It also carries `align-self: center; width: auto; max-width: 100%`. To resize, edit the display height — **never pad a file to match its partner**. The two files deliberately differ in aspect ratio.
+
+---
+
+## 5. Tests & the negative-validation loop
+
+The test tooling lives in `.workbuddy/` — a **local, gitignored scratch directory** holding the test suite, the helper scripts and the project notes. Nothing in it ships and nothing in it is committed, but it is part of the project and should be treated as such: read it, extend it, run it. (The directory name predates this document; it is just a folder name, not a dependency.) Two gates must be green before you call anything done.
+
+### 5.1 Running them
+
+```bash
+# the smoke suite — 385 assertions (plain node, no dependencies)
+node .workbuddy/test_settings.js
+
+# the icon gate — needs fonttools[woff] + brotli
+python .workbuddy/fa_verify.py
+```
+
+On this machine, substitute the interpreters from §8.3 — the bare `python` lacks the icon-gate dependencies, and the shell may start without `node` on `PATH`.
+
+`test_settings.js` is plain stdlib node — any current `node` runs it. `fa_verify.py` needs the third-party packages in §8.3, so on this machine the bare `python` above will fail with `No module named 'fontTools'`; use the interpreter listed there (it has Pillow, `fonttools` and `brotli`).
+
+`test_settings.js` (1748 lines) evaluates the **text** of `src/newtab.js` inside a stub environment — fake `localStorage`, `document`, `chrome`, `browser`, `window` and a `fetch` that always rejects. No browser, no bundler. Stub coverage includes a recording element factory, a `chromeStub` whose `search` may be present or absent (to model Firefox 109/110 vs 111+), and `makeBootedEnv()` which additionally fires `DOMContentLoaded`, exports the module's internals, and accepts a `seed` for "storage that existed before boot".
+
+### 5.2 What the suite covers (14 sections, by assertion topic)
+
+Sections 1–8 run against the plain harness: I18N key parity and dead-key removal · tab list · the per-tab item model · the browser-default engine routing · search box styles and their size settings · numeric resolution (`0` and nonsense both mean "default") · range hints and value migration · two-option settings flipping in place · the shortcut model · rendered cards · status text · icons in both CSS and font · panel geometry · dismissal wiring.
+
+Sections 9–14 run against `makeBootedEnv()` and the real handlers: the shortcut dialog · custom CSS storage/injection/status · the custom CSS dialog · the first-switch-on gate · the popup's rescue of an already-open page · the popup package held in step with the page (manifest, permissions, locale files, and the `POPUP_I18N`/`CUSTOM_CSS_KEY` cross-file sync).
+
+### 5.3 Cross-file assertions (these fail if two files drift)
+
+The `Test §` column is the section number **inside `test_settings.js`**, not a section of this document.
+
+| Contract | Test § |
+| --- | --- |
+| `popup.js`'s `CUSTOM_CSS_KEY` === `STORAGE_KEYS.customCSS` | 14 |
+| `POPUP_I18N.<lang>.clear` === `I18N.<lang>.actionTitle` (both languages) | 14 |
+| `_locales/*/messages.json` `actionTitle` === `I18N.actionTitle` | 14 |
+| `popup.css` colour values exist **verbatim** in `newtab.css` | 14 |
+| `newtab.css` numeric defaults match `SEARCH_LIMITS` | 7b / 7c |
+| the two manifests differ by `chrome_settings_overrides` alone, key order included | 14 |
+| permissions are exactly `["search"]`, with no `optional_permissions`/`host_permissions`/`background`/`content_scripts` | 14 |
+| `newtab.css` contains no `!important` | 10 |
+
+### 5.4 The negative-validation harness
+
+`.workbuddy/neg_check.js` automates the discipline that positive tests can pass for the wrong reason: for each behaviour, **patch in the defect it is supposed to catch, run the suite, print only the FAIL lines, restore, repeat** — then confirm the restored tree is green again.
+
+- `cases` is a **scratch list**: rewrite it for whatever you are changing. Anchors are written with LF and translated to the file's own line endings; **a stale anchor must report a harness error rather than silently doing nothing** (that is the point — do not "fix" it by swallowing the error).
+- Every case must print at least one FAIL. `(NOT CAUGHT)` means the assertion is not observing that behaviour — after ruling out the three false alarms in §3.
+- The script runs the suite as a **child process**. In one restricted sandbox the runtime was denied all child processes (`spawnSync` → `EBUSY`), which makes *every* case read `(NOT CAUGHT)` at once — an environment artefact, not a set of weak assertions. If you hit that, a Python `subprocess` equivalent usually is not restricted and can drive the same loop.
+- **Do not create a second script of this kind.** Extend `neg_check.js`.
+
+---
+
+## 6. The extension's model
+
+Read the subsection for whatever you touch.
+
+### 6.1 Search
+
+`isURL(text)` decides between `openURL()` and `search()`. The `browser` engine is handed to `defaultEngineAPI()` as `api.query({ text })`, so the browser's own default engine answers it; `engineOptions()` only offers that entry where the probe succeeds, and `search()` falls back to `google` where it does not.
+
+### 6.2 Search box sizing
+
+Two styles; the sizes are `localStorage` numbers published by `updateSearchStyle()` as CSS custom properties **on `document.documentElement`**.
 
 | Style | Frame | Custom properties |
 | --- | --- | --- |
 | `modern` | Full box with a blur backdrop | `--search-radius`, `--search-border`, `--search-length`, `--search-transparency` |
 | `geek` | Baseline only (`border: none` + `border-bottom`) | `--search-border`, `--search-length`, `--search-transparency` |
 
-- **The transparency is the one numeric setting both styles share a meaning for.** It is applied as `opacity` on `.search-box` — the wrapper around the field, the placeholder *and* the Go button — rather than to either frame, so it behaves identically on a full box and on a bare underline, and fades the whole control as a unit. The radius is the opposite case: meaningless without a frame, so its tile is offered for `modern` alone.
-- It is published as a **bare number** (`--search-transparency: 60`), not as `60%`, because the rule does arithmetic on it: `opacity: calc(1 - var(--search-transparency, 0) / 100)`. A `px`/`%` tail would make the `calc()` invalid and the whole declaration would be dropped, leaving the box stuck opaque. `styleValue()` decides this from `spec.unit`: `px` settings travel with their unit attached and are read straight back, `%` ones travel bare. Note the fallback `0` resolves to `opacity: 1`, ie the untouched box.
+- **The properties belong on the root.** Custom properties inherit downwards only, and `.main` — an *ancestor* of the form — sizes its own `max-width` from `--search-length`. Writing them on `#search-form` hides the value from `.main`, which then clamps the box and makes the length setting look inert above that ceiling. `.main` uses `max-width: calc(var(--search-length, 500px) + var(--page-pad) * 2)` and centres with `margin: 0 auto`. **Never put a flat `max-width` back on `.main`** (it was `600px`). `#app` must keep `width: 100%`: the body is a centring flexbox, so otherwise the app shrinks to its content width.
+- **Transparency is published as a bare number** (`--search-transparency: 60`), not `60%`, because the rule does arithmetic: `opacity: calc(1 - var(--search-transparency, 0) / 100)`. A `px`/`%` tail makes the `calc()` invalid and the declaration is dropped, leaving the box stuck opaque. `styleValue()` decides this from `spec.unit` — `px` settings travel with their unit, `%` ones bare. It is applied to `.search-box` (the wrapper around field + placeholder + Go button), so it behaves identically on both styles.
+- **`0` means "keep the default" for every numeric setting and is always accepted**: `isValidLimit()` returns true for `0` regardless of `min`; `readLimit()` turns a stored `0` back into `spec.default`. Only set a `min` above 0 to express the smallest *meaningful* value, not to forbid 0. `transparency` is the single spec where `default === 0` falls **below** its own `min` — hence `test_settings.js` asserts `min <= default < max` only over the three px specs.
+- `SEARCH_LIMITS` is the single source of truth; the CSS `var(--x, <default>)` fallbacks exist only so a bare `newtab.html` paints before JS runs, and the suite asserts the two stay in step.
+- The radius is written even for `geek` (whose rule hard-codes `border-radius: 0`) so switching styles back and forth cannot lose the value.
+- The dialog's range hint is built from the single `rangeHint` template filled from `SEARCH_LIMITS` — never hard-code a range or a unit, and never add a flag-selected second wording. `unit` is what the tile's status line prints too, so the panel and dialog cannot disagree.
 
-- **The custom properties belong on the root element.** Custom properties inherit downwards only, and `.main` — an *ancestor* of the form — sizes its own `max-width` from `--search-length`, so the container can hold the box at the configured width. Writing them on `#search-form` (as this originally did) hides the value from `.main`, which then clamps the box to the container and makes the length setting look inert above that ceiling. `.main` uses `max-width: calc(var(--search-length, 500px) + var(--page-pad) * 2)` — with border-box that leaves exactly `--search-length` of content — and centres itself with `margin: 0 auto`. **Never put a flat `max-width` back on `.main`**: it was `600px` before, ie 536px of content. `#app` must keep `width: 100%`: the body is a centring flexbox, so left to itself the app div shrinks to its content's max-content width, which no `--search-length` can ever exceed.
-- `SEARCH_LIMITS` in `newtab.js` is the single source of truth for the allowed ranges and the defaults; `readLimit()` resolves anything missing, non-integer, or out of range to `spec.default`, and `isValidLimit()` is what the dialog validates against — the two share the rule so a rejected input and a stored value can never disagree.
-- **`0` means "keep the default" for every numeric search box setting**, and is always accepted: `isValidLimit()` returns true for `0` regardless of `min`, and `readLimit()` turns a stored `0` back into `spec.default`. So `0` and the default render identically — the tile reports the resolved value, and the dialog's field is prefilled with it too. There is no per-setting flag for this any more; it is the single rule. Only offer a `min` above 0 because it is the smallest *meaningful* value, not to forbid 0. The transparency is the one setting whose default **is** `0` (no fade at all), which is why its range starts at 1: `transparency` is therefore the single spec where `0 <= default < min` is expected, and `test_settings.js` asserts `min <= default < max` only over the three px specs, keeping the weaker "the default is expressible" form for the whole set.
-- The CSS rules carry the same defaults as `var(--x, <default>)` fallbacks, purely so a bare `newtab.html` paints sensibly before JS runs. **Keep the two numbers in step** — `.workbuddy/test_settings.js` asserts that they match.
-- The radius is written even for `geek`, where the rule hard-codes `border-radius: 0`. Writing it unconditionally means switching styles back and forth cannot lose the value.
-- The range hint in the dialog's placeholder comes from the single `rangeHint` template in `I18N`, filled with `min` / `max` / `default` / `unit` from `SEARCH_LIMITS` — never hard-code a range or a unit in the markup, and never add a second wording selected by a flag: the field must advertise exactly the limits the validator enforces, including what `0` resolves to. `unit` is what the tile's status line prints too (`itemStatus()`), so the panel and the dialog cannot disagree about whether a number means px or percent. `.settings-dialog-number` is widened to fit that hint on one line, because a placeholder cannot wrap.
+### 6.3 Custom CSS
 
-## Shortcuts
+One user-written stylesheet under `customCSS`, injected as `<style id="custom-css">` appended to `<head>`. The Advanced tab's `custom-css` tile opens it.
 
-Up to four user-defined links (`SHORTCUT_MAX`) in a bottom row, stored as one JSON array under the single `shortcuts` key. Each entry is `{ title, url, weight }`.
+- **Blank means off, and there is no third state.** `writeCustomCSS()` removes the key when the trimmed text is empty, so "stored" ≡ "switched on" and the tile needs one read. `customCSSEnabled()` still trims on the way in, because `localStorage` is hand-writable and a file of spaces must not read as configured.
+- **Placement is the precedence mechanism.** `newtab.css` is linked in `<head>` and declares nothing `!important`, so between equal-specificity rules the later wins; appending at `DOMContentLoaded` puts the sheet after that link on every load. That is why `updateCustomCSS()` must keep appending to `document.head`, and why the suite asserts `newtab.css` has no `!important`. **The claim and the assertion stand or fall together.**
+- **`textContent`, never `innerHTML`** — a `</style>` inside the CSS stays inert text instead of ending the element.
+- **Off means detached, not blanked.** Switching off removes the element and drops the reference; switching back builds a fresh one (re-appending it last, preserving the ordering above). Re-applying while on must **reuse** the mounted element, or it leaks and leaves the previous sheet applied.
+- The dialog is a textarea with no error line — any CSS is acceptable and the parser drops what it cannot use, so nothing is ever refused. **Enter must not commit it** (it means "new line" in a textarea); the keydown handler filters on kind. Confirming empty is how the user turns the feature off.
+- The caveat (`customCSSWarning`) lives in `.settings-dialog-actions`, right-aligned next to the confirm button — **not** in `.settings-dialog-error`, which exists to report a *refused value*. It is built only in the `isCSS` branch and the suite holds both directions.
+- One boundary worth knowing: because the search box sizes are **inline** custom properties on `documentElement`, a user sheet cannot retune `--search-length` with a plain `:root { … }` — that needs `!important`, or the user targets elements instead of variables.
+
+### 6.4 Shortcuts
+
+Up to four links (`SHORTCUT_MAX`) in a bottom row, stored as one JSON array under `shortcuts`. Each entry is `{ title, url, weight }`.
 
 | Field | Rule |
 | --- | --- |
-| `title` | Required. Trimmed, capped at `SHORTCUT_TITLE_MAX` (60) characters, escaped on render. |
-| `url` | Required. Normalised by `normalizeURL()` — see below. |
-| `weight` | Whole number 1-4 (`SHORTCUT_WEIGHT`). A **blank field in the dialog** means the default (1), and any missing or unusable stored value falls back to it too. |
+| `title` | Required. Trimmed, capped at `SHORTCUT_TITLE_MAX` (60), escaped on render. |
+| `url` | Required. Normalised by `normalizeURL()`. |
+| `weight` | Whole number 1–4. **A blank field means the default (1)**; any missing/unusable stored value falls back too. |
 
-- **Order is `weight` descending, ties by `title`.** `sortShortcuts()` runs inside `readShortcuts()`, not only on write: the row, the tiles and every index-addressed edit read through it, so "index 0" is the leftmost shortcut whatever produced the stored array (a hand edit, an import, an interrupted write). Drop that sort and a hand-written list silently renders in storage order even though `writeShortcuts()` had sorted it.
-- **`0` is not the default marker here.** This is the one numeric setting where `0` is plain out of range — the weight field asks for the default by being left empty. That is why `isValidWeight()` is separate from `isValidLimit()`, whose `0`-means-default rule belongs to the search box sizes alone.
-- `normalizeURL()` prepends `https://` when the input names no protocol and refuses `javascript:` / `data:` / `vbscript:` outright. A colon only counts as a scheme separator when no digit follows it, so `example.com:8080` stays a host:port instead of being read as an `example.com:` protocol. **The urls land in an `<a href>`, so this is the only thing between a stored string and script execution** — do not relax it, and keep `sanitizeShortcut()` filtering on every read rather than trusting what was written.
-- Every read is sanitised and truncated to the cap; a corrupted value (a `JSON.parse` throw, or a non-array) degrades to an empty list instead of breaking startup.
-- The panel's Shortcuts tab is one tile per shortcut plus an add tile. Clicking a shortcut tile reopens the same dialog prefilled and carrying a Delete button: a hard cap of four with no way to edit or remove would make a typo permanent and lock a user out after four adds. The add tile is a `kind: "shortcut"` item with `index: -1`, disabled (via `item.disabled`, **not** the `"disabled"` kind) while the list is full, so it revives as soon as one is deleted.
-- The dialog is the three-field variant (`.settings-dialog-shortcut`): title / url / weight, prefilled through the `value` property rather than through the markup, because a title and a url are user input. Read every field — and the error line — off `.settings-dialog-options`; querying them off the overlay finds nothing in a real browser, and the dialog would then refuse to save in complete silence.
-- The bottom row is `.shortcuts`, a **sibling** of `.main` (fixed, bottom-centre, hidden when empty). It is out of the flow, so `#app { width: 100% }` and the search box's own centring are unaffected by it.
-- Shortcut titles and urls are the only user-supplied strings in the project. `escapeHTML()` is a pure regex transform for that reason — the familiar textContent/innerHTML round-trip needs a real DOM, so under the smoke tests' stub it would quietly return `""` and every escaping assertion would pass for the wrong reason.
+- **Order is `weight` descending, ties by `title`.** `sortShortcuts()` runs inside `readShortcuts()`, not only on write — the row, the tiles and every index-addressed edit read through it, so "index 0" is the leftmost shortcut whatever produced the stored array. Drop that sort and a hand-edited list silently renders in storage order.
+- **`0` is not the default marker here.** Weight is the one numeric setting where `0` is plain out of range, which is why `isValidWeight()` is separate from `isValidLimit()` (whose `0`-means-default rule belongs to the search box sizes alone).
+- **`normalizeURL()` is the only thing between a stored string and script execution** — the urls land in `<a href>`. It prepends `https://` when the input names no protocol and refuses `javascript:` / `data:` / `vbscript:`. A colon only counts as a scheme separator when no digit follows, so `example.com:8080` stays a host:port. **Do not relax it**, and keep `sanitizeShortcut()` filtering on **every read** rather than trusting what was written.
+- A corrupted value (a `JSON.parse` throw, or a non-array) degrades to an empty list instead of breaking startup.
+- The Shortcuts tab is one tile per shortcut plus an add tile. Clicking a shortcut tile reopens the same dialog prefilled and carrying Delete — a hard cap of four with no way to edit would make a typo permanent. The add tile is `kind: "shortcut"` with `index: -1`, disabled via `item.disabled` (**not** the `"disabled"` kind) while full, so it revives on delete.
+- The dialog is the three-field variant. Prefill through the `value` **property**, not the markup (title and url are user input), and read every field off `.settings-dialog-options` — querying them off the overlay finds nothing in a real browser and the dialog then refuses to save in silence.
+- The row is `.shortcuts`, a **sibling** of `.main` (fixed, bottom-centre, hidden when empty), so `#app { width: 100% }` and the search box's centring are unaffected.
+- Shortcut titles and urls are the only user-supplied strings in the project. `escapeHTML()` is a pure regex transform **for that reason**: the familiar textContent/innerHTML round-trip needs a real DOM, so under the stub it would quietly return `""` and every escaping assertion would pass for the wrong reason.
 
-## Custom CSS
+### 6.5 The settings panel, the dialog, and the gate
 
-One user-written stylesheet, stored as a single trimmed string under `customCSS` and injected as a `<style id="custom-css">` element appended to `<head>`. The Advanced tab's `custom-css` tile opens it; the tile prints `customCSSEnabled` or `customCSSNotSet` in its status line.
+**The panel.** `getSettingsItems(tab)` is the single source of truth: each setting is one entry (`action`, `icon`, `labelKey`, `kind`, `key`, `fallback`, plus `options` for value kinds). `cardHTML()` renders one card; `getSettingsContentHTML()` the strip. Tabs: `appearance` / `searchBoxTab` / `shortcutsTab` / `advanced`.
 
-- **Blank means off, and there is no third state.** `writeCustomCSS()` removes the key when the trimmed text is empty, so "stored" and "switched on" are the same condition and the tile needs exactly one read to report it. `customCSSEnabled()` still trims on the way in, because `localStorage` is hand-writable and a file of spaces must not read as configured.
-- **The placement is the precedence mechanism.** `newtab.css` is linked in `<head>` and declares nothing `!important`, so between two rules of equal specificity the later one wins. Appending the sheet at `DOMContentLoaded` therefore puts it after that link on every load — which is why `updateCustomCSS()` must keep appending to `document.head`, and why `test_settings.js` asserts that `newtab.css` still contains no `!important`. The claim and that assertion stand or fall together.
-- **`textContent`, never `innerHTML`.** The sheet is user input and `textContent` is not re-parsed, so a `</style>` written inside the CSS stays inert text instead of ending the element. Same reasoning as `escapeHTML()` for shortcut titles.
-- **Off means detached, not blanked.** Switching off removes the element and drops the reference; switching back on builds a fresh one, which re-appends it last and preserves the ordering above. Re-applying while already on must **reuse** the mounted element: a new element per apply would both leak and, on the way out, leave the previous sheet applied.
-- The dialog is the textarea variant (`.settings-dialog-css`): one field, prefilled through the `.value` property, with no error line — any CSS at all is acceptable and the parser drops what it cannot use, so there is nothing to refuse. Enter must **not** commit it, because the field is a textarea where Enter means "new line"; the keydown handler filters on kind, and `test_settings.js` fires Enter to hold that open. Confirming empty is how the user turns the feature off.
-- **The caveat lives in the action row, not in the error line.** `${t("customCSSWarning")}` rides in `.settings-dialog-actions` as a `.settings-dialog-warning` span to the left of the confirm button — right-aligned, no `margin-right: auto`, so it stays against the button it qualifies instead of being thrown to the far end (that end belongs to the shortcut dialog's Delete, which says something different). `.settings-dialog-error` is not the place for it: that line exists to report a **refused value**, and nothing here is ever refused. It is built only in the `isCSS` branch, and `test_settings.js` holds both directions — present in the CSS dialog, absent from the shortcut dialog. It has been kept even though the gate now makes the same point one stage earlier: this copy sits at the moment of the commit, which is the only place it is still doing work.
-- `.settings-dialog-warning` is the only rule in the project that uses a colour with a hue: `var(--warn)`, the palette's one non-monochrome token, declared in `:root` (#c0392b) and restated in **both** dark blocks (#ff6b6b, see the CSS-variable pitfall). Keep it that way — an error elsewhere in the panel is still just `--fg` plus the invalid border, and recolouring those would be a design change, not a tidy-up. Both `--warn` counts in `test_settings.js` run on the **comment-stripped** sheet: a comment naming the token is not a reader of it, and counting raw text made the assertion fire on prose that was explaining the rule rather than on a second consumer of it.
-- One boundary worth knowing: the search box sizes are published as **inline** custom properties on `document.documentElement`. An inline style outranks a stylesheet rule, so a user sheet cannot retune `--search-length` with a plain `:root { … }` — that needs `!important`, or the user targets the elements rather than the variables. That is a consequence of `updateSearchStyle()`, not of the injection.
-- Both languages carry `customCSSHint` (the field's placeholder), `customCSSNotSet` and `customCSSEnabled`. The tile's status is a `statusText` built in `getSettingsItems()`, not an `itemStatus()` case: the state is "is anything stored", which is not one of a list of values. The old `comingSoon` key is gone — do not reintroduce placeholder wording for this tile.
+Kinds: `"toggle"` flips a boolean in place; `"cycle"` steps to its other option in place (`cycleCurrent()`); `"select"`, `"number"`, `"shortcut"` and `"css"` open a dialog; `"disabled"` is inert. **A setting with exactly two options is always a `cycle`** — a menu for two choices is a needless step — and the suite enforces both halves (every `cycle` has 2 options, every `select` ≥3). `getSettingsItems()` is **not** a pure function of the tab: the Search Box tab reads the *current* `searchStyle` (radius only for `modern`; border/length/transparency for both) and the Shortcuts tab builds one tile per stored shortcut plus the add tile. A card therefore carries either a static `labelKey` or a runtime `name`, and either a computed `itemStatus()` or a literal `statusText`.
 
-### The first-switch-on gate
+**Dismissal.** The panel collapses on a right-click (which toggles it) or a click outside it, and on nothing else. A detached-target edge case is covered by a capture-phase containment sample — there is a recorded regression test for it, so don't refactor that listener casually.
 
-This sheet is the one setting that can break the page it lives on, and the page is the only place to undo it. So the dialog opens on a warning instead of on its editor: the **gate** stands between the tile and the sheet, and only a first switch-on ever sees it.
+**The gate.** The custom CSS sheet is the one setting that can break the page it lives on, and the page is the only place to undo it. So the dialog opens on a warning instead of its editor, and only a first switch-on sees it. These are the deliberate decisions — read them before touching it:
 
-- **The gate is the entry, not the commit.** `openSettingsDialog()` diverts to `openCSSGateStage()`; the editor's own confirm goes straight to storage, however the sheet changed. That is deliberate — rewriting a sheet that is already live, and blanking the field (which switches the feature off) both leave the page exactly as working as it was, so gating them would tax the iteration the feature exists for.
-- **One line decides it, and it also owns the width.** `isGate` is `isCSS && !customCSSEnabled() && !cssGateAcked()`, computed after the kind is known and before anything renders; the same boolean toggles `settings-dialog-css` (the editor's `min(720px, 70vw)`) and `settings-dialog-css-confirm` (the gate's `min(520px, 70vw)`, using `min()` so it lands inside `.settings-dialog`'s own `max-width: 70vw` instead of overriding it). Because they are re-derived on every open, `stopCSSGateCountdown()` does not undo them and no other function has to — and the two can never both be on.
-- **"First switch-on" is one stored bit: `cssGateAck`.** `customCSSEnabled()` answers the sheet half, and `cssGateAcked()` (`localStorage.getItem(STORAGE_KEYS.cssGateAck) === "true"`) answers the "has the warning ever been agreed to" half. `confirmCSSGate()` is the only writer, and it latches **before** reopening so the handover to the editor cannot loop back into the gate. The latch is permanent by design: once confirmed, the gate never shows again — not on a reload, not in a later session, not after the popup rescue clears the sheet (the popup removes only `customCSS`, so the ack survives). A gate that was **escaped** latches nothing, so walking away and coming back re-asks; that is the only re-ask left, and it is the right one because nothing was agreed to.
-- **The gate rewrites the dialog's contents, not the dialog.** It replaces `.settings-dialog-options` (and the title) inside the same overlay, filled in by `openCSSGateStage()` rather than by one of `openSettingsDialog()`'s branches — those render a settings item's `labelKey`/`options`, which this stage has none of.
-- **Two paragraphs and one button.** The first says what the feature is for (`customCSSConfirmNotice`), the second is the way out (`customCSSConfirmEscape`) and is the only place in the product that ever teaches the toolbar button — so it gets its own block and `font-weight: 500` rather than a colour: `var(--warn)` has exactly one reader **by assertion**, and a second reader would both fail that check and start a second warning colour the panel's monochrome look has no room for. It names the button by the string `actionTitle` carries, in both languages, compared case-insensitively because a sentence may open the phrase with a capital — a promise pointing at a differently-labelled button is worse than no promise. `test_settings.js` counts the paragraphs, so a third one cannot creep back in by habit. The action row carries **no dismiss button**: the dialog's own close button is the way out, exactly as in the editor stage, because the gate stands *before* the editor and so has no earlier stage to return to. (The older "pin dotStart first" hint and the separate countdown line are gone with their elements; do not reintroduce either without asking.)
-- **What is deliberately absent from this feature.** Three defences were designed and dropped; do not reintroduce them without being asked. (1) Scanning the sheet before storing it — the DOM exposes no parse diagnostics, so that can only ever be a blacklist of patterns, which contradicts the whole point of letting advanced users write CSS. (2) A trial period with automatic rollback (a `customCSSPending` key plus a countdown bar). (3) A self-check fuse that probes whether the settings panel is still reachable. What survives is the pair that was chosen: tell the user before they reach the editor, and give them a way out that does not live on the page.
-- **Routing one button between two stages is keyed on `cssGateOpen`.** Both stages put a `.settings-dialog-confirm` in the same slot, so the dialog's click handler asks which one is up instead of asking which `kind` — `settingsDialogItem` stays the css item throughout, and rewriting `item.kind` to mark the gate would break that invariant. State rather than something in the rendered dialog is deliberate: the test harness has no real markup, so the same click has to route the same way in both places, and a rule read off the DOM would route one way in the browser and the other under test.
-- **Eight seconds, enforced in state and printed in the button.** All eight ticks are scheduled up front into `cssGateTimers` rather than one interval rescheduling itself, so the single teardown cannot miss a repeat. Each tick rewrites the confirm button's own label (`cssGateLabel()`, `customCSSConfirmWait` — built from the same `confirm` string as every other dialog's button), so there is no second element to keep in step; the last tick puts the plain `confirm` word back and sets `disabled = false`, which is what leaves the gate's button indistinguishable from any other dialog's by the time it can be pressed. `confirmCSSGate()` re-checks `cssGateArmed`: the `disabled` attribute only stops a pointer, so without that check the wait would be advisory. The digits carry `font-variant-numeric: tabular-nums`, or the button twitches as they change; the label does lose its `(n)` at the end, which is one deliberate width change at the same moment the button stops being a waiting button. `.settings-dialog-confirm:disabled` is declared **after** the `:hover` rule so a locked button cannot light up (same specificity, later wins).
-- **`stopCSSGateCountdown()` is the only place that touches `cssGateTimers`,** and `closeSettingsDialog()` — the single exit for the close button, Escape, a backdrop click, a finished confirm and the gate handing over to the editor — is its only caller besides `confirmCSSGate()`. So "the countdown is always stopped and the gate always torn down" holds without repeating that cleanup at five call sites.
-- Both keydown handlers are inert here: the dialog's own one filters on kind (`number` / `shortcut` only) and `settingsDialogItem.kind` is `"css"` for both stages, so Enter cannot clear the gate — nor would it do anything one stage later, where the field is a textarea and Enter means a newline.
+- **The gate is the entry, not the commit.** `openSettingsDialog()` diverts to `openCSSGateStage()`. The editor's confirm goes straight to storage. Rewriting a live sheet and blanking the field (which switches the feature off) both leave the page as working as before, so gating them would tax the iteration the feature exists for.
+- **One boolean decides it and owns the width.** `isGate = isCSS && !customCSSEnabled() && !cssGateAcked()`, computed after the kind is known and before anything renders; it toggles `settings-dialog-css` (editor, `min(720px, 70vw)`) against `settings-dialog-css-confirm` (gate, `min(520px, 70vw)`) — `min()` so it lands *inside* `.settings-dialog`'s own `max-width: 70vw` instead of overriding it. Re-derived on every open, so `stopCSSGateCountdown()` does not undo them and the two can never both be on.
+- **"First switch-on" is one stored bit: `cssGateAck`.** `confirmCSSGate()` is the only writer and latches **before** reopening, so the handover cannot loop back. The latch is permanent: once confirmed the gate never shows again — not on reload, not in a later session, not after the popup rescue (which removes only `customCSS`). A gate that was **escaped** latches nothing, so walking away and coming back re-asks; that is the only re-ask left, and it is right, because nothing was agreed to.
+- **The gate rewrites the dialog's contents, not the dialog.** It replaces `.settings-dialog-options` and the title inside the same overlay, filled by `openCSSGateStage()` rather than by one of `openSettingsDialog()`'s branches (which render a settings item's `labelKey`/`options`, none of which this stage has).
+- **Two paragraphs, one button, no dismiss button.** The first says what the feature is for (`customCSSConfirmNotice`); the second is the way out (`customCSSConfirmEscape`) and is the only place in the product that teaches the toolbar button — hence its own block and `font-weight: 500` rather than a colour (`--warn` has exactly one reader). It names the button by the `actionTitle` string in both languages, compared case-insensitively because a sentence may capitalise it — a promise pointing at a differently-labelled button is worse than no promise. The action row carries no dismiss button: the dialog's own close button is the way out, exactly as in the editor stage, because the gate stands *before* the editor and has no earlier stage to return to. The suite counts the paragraphs, so a third cannot creep back in.
+- **Routing one button between two stages is keyed on the `cssGateOpen` state**, not on `kind` and not on the DOM. `settingsDialogItem` stays the css item throughout; rewriting `item.kind` to mark the gate would break that invariant, and a DOM-read rule would route one way in the browser and the other under test (the stub has no real markup).
+- **Eight seconds, enforced in state and printed in the button.** All eight ticks are scheduled up front into `cssGateTimers` (so the single teardown cannot miss a repeat). Each tick rewrites the confirm button's own label (`cssGateLabel()`/`customCSSConfirmWait`), so there is no second element to keep in step; the last tick restores the plain word and sets `disabled = false`, leaving the gate's button indistinguishable from any other by the time it can be pressed. `confirmCSSGate()` re-checks `cssGateArmed` — the `disabled` attribute only stops a pointer. The digits carry `font-variant-numeric: tabular-nums` or the button twitches.
+- **`stopCSSGateCountdown()` is the only place that touches `cssGateTimers`**, and `closeSettingsDialog()` — the single exit for the close button, Escape, a backdrop click, a finished confirm and the handover — is its only caller besides `confirmCSSGate()`. So "the countdown is always stopped and the gate always torn down" holds without repeating cleanup at five call sites.
+- **Deliberately absent; do not reintroduce without being asked:** scanning the sheet before storing (no parse diagnostics in the DOM, so it can only be a blacklist, which contradicts the feature), a trial-with-rollback (`customCSSPending` + countdown bar), and a self-check fuse probing panel reachability. What survives is the chosen pair: **tell the user before they reach the editor, and give them a way out that does not live on the page.**
+- The older "pin dotStart first" hint, the separate countdown line, and the Back button are gone. A leftover `I18N` string for any of them is wording no screen can show; the suite asserts they stay removed.
 
-### The toolbar popup
+### 6.6 Permissions
 
-`manifest.json` declares `action.default_popup = "popup.html"` — a second document on the **same extension origin**, and that is the whole mechanism: same origin means the same `localStorage`, so clearing `customCSS` there clears the sheet this page reads. No permission, no message passing, no service worker.
+The only declared permission is **`search`** (`chrome.search.query()` — Chrome only; Firefox ignores the API but recognises the permission).
 
-- **A `storage` event rescues a page that is already open.** `window.addEventListener("storage", …)` in `newtab.js` reruns `updateCustomCSS()` + `renderSettingsPanel()` for the `customCSS` key (and for `key === null`, which is how `localStorage.clear()` arrives). So a user whose page a bad sheet has already wrecked recovers live, without a reload. Nothing in flight has to be dropped any more, because there is nothing in flight: the editor writes only when its confirm is pressed, and the gate only stands while nothing is stored — the very state a rescue produces. A dialog left open across a rescue therefore still offers to write, exactly as it did before the gate existed.
-- **The key filter is load-bearing.** Without it, any unrelated write anywhere in the extension would refresh this page's sheet and rebuild the panel. `test_settings.js` observes it where it is actually visible: refreshing an already-mounted sheet is idempotent, so "the sheet survives an unrelated write" cannot tell a filtered listener from an unfiltered one — but the rebuild can, so the suite leaves a sentinel string in `.settings-content` and asserts that only the sheet's own key overwrites it.
-- **The popup carries its own copy of its two strings** (`POPUP_I18N`) and its own `CUSTOM_CSS_KEY`. It cannot import `I18N` — `newtab.js` exports nothing, there is no build step, and importing it would boot the whole new tab page inside a 200 px popup. `test_settings.js` is what keeps them in step: the key literal must equal `STORAGE_KEYS.customCSS`, and the button label must equal `I18N.actionTitle`, so renaming either side fails the suite instead of leaving the button quietly clearing nothing.
-- **The popup does not load `newtab.css`.** That sheet's `body` is `min-height: 100vh` + flex centring — right for a page, wrong for a panel that must hug its content. `src/popup.css` restates only the four tokens it reads (`--bg`, `--fg`, `--border`, `--muted`), and the test asserts every value it names exists verbatim in `newtab.css` so a retheme cannot leave the toolbar panel a shade behind.
-- `actionTitle` lives in **both** `_locales/*/messages.json` (for `__MSG_actionTitle__`, which resolves against the browser's UI locale) **and** `I18N` in both languages. The page calls `chrome.action.setTitle()` at `DOMContentLoaded` so the tooltip follows the language chosen *in the app*; the manifest value remains the fallback for the window before a new tab has ever loaded. The gate's escape paragraph quotes that same string — it is the only thing in the product pointing a panicking user at the button, and `test_settings.js` asserts the two stay in sync in both languages (case-insensitively, since a sentence may open the phrase with a capital where the button does not).
+- **No `optional_permissions`** — the former `bookmarks`/`history` belonged to the old fixed shortcuts row and the bookmarks-history sidebar, both dropped. The current shortcuts row needs nothing: entries are user-supplied http(s) urls as plain `<a href>`. **The `bookmarks`/`history` permissions must stay gone.**
+- **No `tabs`** — nothing calls `tabs.create()`; the row is plain links, and `tabs` would only be needed to read `url`/`pendingUrl`/`title`/`favIconUrl` off `Tab` objects.
+- **The custom CSS sheet needs no permission and no CSP relaxation** — a `<style>` built with `createElement()` and filled via `textContent` is same-origin CSS, not inline script, and MV3's default policy restricts `script-src` alone. Do not add a `content_security_policy`.
+- **The toolbar popup needs nothing** — it is an extension page on the same origin, so it reads and writes the very same `localStorage`. There is no background worker and no message passing anywhere.
+- **The homepage override needs nothing** either, but it is the one entry that is **visible and revocable by the user**: Firefox asks once on first use and the choice stays under Settings → Home. It only sticks for a properly installed add-on (a temporary `about:debugging` load is gone at restart, homepage and all).
 
+### 6.7 The toolbar popup
 
-## Permissions (`manifest.json`)
+`action.default_popup = "popup.html"` — a second document on the **same extension origin**, and that is the whole mechanism: same origin ⇒ same `localStorage` ⇒ clearing `customCSS` there clears the sheet the page reads. No permission, no message passing, no service worker.
 
-The only declared permission is `search` — `chrome.search.query()` (Chrome only; Firefox ignores the API but recognises the permission). There are **no** `optional_permissions`: the former `bookmarks` / `history` optional permissions belonged to the old fixed shortcuts row (bookmarks / history / downloads / extensions) and to the bookmarks-history sidebar, both of which were dropped with it.
+- **A `storage` event rescues an already-open page.** The listener in `newtab.js` reruns `updateCustomCSS()` + `renderSettingsPanel()` for the `customCSS` key (and for `key === null`, which is how `localStorage.clear()` arrives). So a user whose page a bad sheet has wrecked recovers live, without a reload.
+- **The key filter is load-bearing.** Without it, any unrelated write would refresh the sheet and rebuild the panel. The suite observes it where it is visible: refreshing an already-mounted sheet is idempotent, so "the sheet survives an unrelated write" cannot tell a filtered listener from an unfiltered one — but the rebuild can, so the suite leaves a sentinel in `.settings-content` and asserts only the sheet's own key overwrites it.
+- **The popup carries its own `POPUP_I18N` and `CUSTOM_CSS_KEY`.** It cannot import `I18N` — `newtab.js` exports nothing, there is no build step, and importing it would boot the whole new tab page inside a 200 px popup. Four cross-file assertions keep them in step (§5.3).
+- `actionTitle` lives in **both** `_locales/*/messages.json` (for `__MSG_actionTitle__`, resolved against the browser's UI locale) **and** `I18N` in both languages. The page calls `chrome.action.setTitle()` at `DOMContentLoaded` so the tooltip follows the in-app language; the manifest value is the fallback for the window before a new tab has loaded. The gate's escape paragraph quotes that same string.
 
-The shortcuts row is back, but it needs no permission at all: entries are user-supplied http(s) urls rendered as plain `<a href>` links, so nothing reads the browser's bookmarks, history or tabs. The `bookmarks` / `history` permissions must stay gone.
+---
 
-`tabs` is deliberately **not** declared either. Nothing here calls `tabs.create()` — the row is plain links — and `tabs` would only be required to read `url` / `pendingUrl` / `title` / `favIconUrl` off `Tab` objects. Do not add it back.
+## 7. Building & loading
 
-The custom CSS sheet needs no permission and no CSP relaxation: a `<style>` element built with `createElement()` and filled through `textContent` is same-origin CSS, not inline script, and the MV3 default policy restricts `script-src` alone. Do not add a `content_security_policy` entry on its behalf.
+### 7.1 Packaging
 
-The toolbar `action` needs no permission either. The popup is an extension page — it shares the extension origin, so it reads and writes the very same `localStorage` this page uses, and it renders nothing but a button and a line of text. There is no `background` service worker and no message passing anywhere in this feature; do not add `storage`, `scripting`, `tabs` or a `background` entry for it. `test_settings.js` asserts the permission array is still exactly `["search"]` and that no `optional_permissions` / `background` / `content_scripts` block has appeared.
-
-The homepage override needs no permission either, and it is the one entry here that is **visible to the user and revocable by them**. `chrome_url_overrides.newtab` only covers new tabs; a Firefox user who opens the browser onto their homepage, or clicks the home button, still got the stock page, so the Firefox manifest points `chrome_settings_overrides.homepage` at the same bundled `newtab.html`. Firefox asks the user once, on first use, and the choice stays visible and revocable under Settings → Home; it is not a silent hijack. A homepage override also only sticks for a properly installed add-on: a temporary load via `about:debugging` is gone at restart, homepage and all.
-
-**The two browsers want different values, so the key lives in a second manifest.** Chromium accepts a homepage override only as an absolute URL whose scheme is http or https: `CreateManifestURL()` in `chrome/common/extensions/manifest_handlers/settings_overrides_handler.cc` returns `nullopt` for anything else, and since `homepage` is then the only key under `chrome_settings_overrides`, `Parse()` fails and **the whole extension refuses to load** — "Invalid value for overriding homepage url: 'newtab.html'". Firefox is the opposite: a bundled page has to be named as a path relative to the manifest. No single value satisfies both, and `browser_specific_settings` cannot fork manifest keys, so `manifest.json` carries no `chrome_settings_overrides` at all, `manifest.firefox.json` adds it, and the build swaps that file in for the xpi. Whenever either browser does accept the key it adds a settings-override entry to the install prompt (`PermissionsParser::AddAPIPermission(kHomepage …)`), which is the visible-consent side of the same API. Do not "tidy up" by moving the key back into `manifest.json`: `test_settings.js` fails if it reappears there, because that regression is not a warning at install time, it is a refusal to install.
-
-Two caveats live outside this repo: Chrome's store policy makes settings overrides inconsistent with its single-purpose policy when other permissions are present (this extension declares `search`), and asks for the homepage's domain to be verified by the publishing account — local unpacked loading is unaffected.
-
-Manifest permissions cannot be split per browser — there is no `browser_specific_settings` override for `permissions`, so Chrome and Firefox read the same array. The homepage key above is the one exception to "one manifest", and it earns it by being unshareable rather than merely convenient; keep the fork to that key.
-
-## Firefox Compatibility
-
-`browser_specific_settings.gecko.id = "dotstart@amexe2.github.io"`, `strict_min_version = "128.0"` and `data_collection_permissions.required = ["none"]`. Code paths:
-
-- The "browser default" search engine is gated on **capability, not a browser sniff**: `defaultEngineAPI()` probes `chrome.search.query` and `browser.search.query` and returns the first that exists, `browser` first — Firefox publishes that namespace natively and only aliases it as `chrome`, and Chromium has no `browser` at all, so each browser ends up on its native form. Firefox has shipped `browser.search.query` since **111**, so Firefox users get the entry like everyone else — it used to be hidden behind `isFirefox()`, which silently made "跟随浏览器" unsettable there. Firefox 109/110 have the `search` namespace *without* `query()`, which is exactly why the probe checks the method, not the namespace: `search()` then falls back to `google` instead of doing nothing at all. Those versions sit below the floor and cannot install the extension, so that fallback is defensive rather than reachable — keep it anyway, because it is the probe's own contract and the reason raising the floor stranded nothing. When a future feature needs `chrome://` pages or privileged `about:` URLs, remember that Firefox rejects **both** families in `tabs.create` and has no reachable equivalent — do not try to remap them.
-
-**The data-collection declaration and the version floor are one decision, not two.** AMO has required `browser_specific_settings.gecko.data_collection_permissions` for new submissions since 2025-11-03, and Firefox refuses to sign without it; `required` takes either the literal `"none"` or one or more data-type names, and `"none"` is the honest value here. It stays honest for a reason worth remembering: the extension transmits nothing, its only `fetch` reads the bundled `LICENSE` back through `runtime.getURL()`, and `search` hands the query to the browser's own engine rather than to a server. The key lives in the **shared** manifest rather than a third variant, because `browser_specific_settings` is a Gecko-only namespace and Chrome ignores it whole — so it is not a second thing for the two browsers to disagree about, and the two manifests still differ by the homepage key alone.
-
-The floor moved with it, `109.0` → `128.0`, and that half is the easy one to get wrong: Firefox 127 and below do not ignore this key, they **error** on it, so declaring it under the old floor would have traded "no declaration" for "will not install at all" on every version older than the key. The floor above those versions turns a hard error into a plain "not supported". No code changed for the bump. `test_settings.js` asserts the key, the floor, and the two together, since editing one without the other is the mistake worth catching.
-
-## Loading the Extension
-
-Chrome:
-
-1. Open `chrome://extensions/`, enable Developer mode.
-2. "Load unpacked" → pick the project root.
-3. After changes, click the refresh icon on the extension card.
-4. Then open a new tab. If an icon ever comes up blank while the rest of a change is visible, suspect a cached resource rather than the CSS: the subset font is the only file loaded as a font, and its `?v=` tail (see the icon conventions) is what makes a regenerated copy take effect. A hard reload of the page settles anything else.
-
-Firefox:
-
-1. Open `about:debugging#/runtime/this-firefox`.
-2. "Load Temporary Add-on…" → pick `dist-firefox.xpi`, or `manifest.json` to inspect the page alone.
-3. Re-load after each change (temporary add-ons don't persist).
-
-Picking `manifest.json` loads the directory, which is the shared, Chrome-safe manifest — so that session has no homepage override. Only the xpi carries `manifest.firefox.json`.
-
-## Packaging
-
-`python .workbuddy/make_dist.py` writes both artifacts and verifies them in the same run:
-
-- `dist-chromium.zip` — `git archive HEAD` exactly as it stands, for Chrome's "Load unpacked".
+```bash
+python .workbuddy/make_dist.py      # builds AND verifies both artifacts; non-zero exit = failure
+```
+- `dist-chromium.zip` — `git archive HEAD` exactly as it stands.
 - `dist-firefox.xpi` — the same tree with `manifest.firefox.json` swapped in for `manifest.json`.
 
-The swap goes through a throwaway index (`GIT_INDEX_FILE=…`), so the real index is untouched and both files stay native `git archive` output: same line endings, same entry set. Do not hand-edit a manifest inside either archive, and do not re-zip one — regenerate instead. Both are gitignored. The verifier fails if either artifact ships `manifest.firefox.json` or `.gitattributes`, if the xpi has no homepage override, if the shipping manifest has one, if the two manifests differ by anything other than that key, or if a text entry came out CRLF.
+The swap goes through a throwaway index (`GIT_INDEX_FILE=…`), so the real index is untouched and both files stay native `git archive` output — same line endings, same entry set. **Do not hand-edit a manifest inside either archive and do not re-zip one; regenerate instead.** Both artifacts are gitignored.
 
-## Editing Conventions
+The verifier fails if either artifact ships `manifest.firefox.json` or `.gitattributes`, if the xpi has no homepage override, if the shipping manifest has one, if the two manifests differ by anything other than that key, or if a text entry came out CRLF.
 
-- **Do not** add a build step. Keep `src/newtab.js` directly loadable by the browser.
-- **Do not** introduce \uXXXX escapes in source files. Write Chinese as actual characters; the previous bundler output has been replaced with literal text.
-- All user-visible strings must live in `I18N` or `ONBOARDING_I18N`, with parallel `en` and `zh` keys. Use `t(key)` to read them.
-- Long-form text: `LICENSE` ships as a file and is read with `loadLicenseText()`. The Easter-egg text is the opposite — it is **hard-coded** in `EASTER_CONTENT` so the extension needs no loose data file for it. `EASTER.MD` in the repo root is the human-editable working copy: when it changes, re-sync the constant byte for byte (including the `{{version}}` placeholder). Keep the two identical.
-- `EASTER_CONTENT` is one **bilingual** text shared by all languages. Section headings stay inline (`**# 仓库 Repository**`); the tagline and release-note entries stack the two languages on separate lines (`**修复** …` then `**Fixed** …`) so no line mixes zh and en. Blank lines are meaningful — each one becomes a `<br>` in the scroll, so they control the vertical rhythm. Do not add HTML comments to the constant; they would be injected as-is.
-- The Easter-egg crawl runs at a fixed `EASTER_CRAWL_SPEED` (150 px/s). The keyframe ends at `translateY(calc(-100% - 100vh))` and the duration is computed from the measured content height in `showEasterEgg()`. If you change the text length, nothing else needs touching — but do not go back to a fixed duration or a fixed `-200%`, which made speed depend on text length and left a blank screen at the end of each loop.
-- Version numbers live in `manifest.json`. Read them at runtime via `getRuntimeVersion()` (wraps `chrome.runtime.getManifest().version`) rather than hard-coding in source or in `EASTER.MD`, which uses a `{{version}}` placeholder instead.
-- Icons in the settings panel come from **Font Awesome Free (Solid)**, shipped as a local subset font — the extension is offline, so a CDN `<link>` is never acceptable. Adding an icon means: append its name to `ICONS` in `.workbuddy/fa_subset.py`, re-run it (needs `fonttools[woff]` + `brotli` in the managed venv), copy the printed codepoint into `newtab.css`, then run `.workbuddy/fa_verify.py`. Keep `src/fa-solid-900-subset.LICENSE.txt` with the font (OFL requirement). **Pick a glyph whose codepoint is in the PUA**: `fa-plus` is `U+002B`, an ASCII plus, and every codepoint parser here (`.workbuddy/fa_verify.py`, `test_settings.js`) matches 4-6 hex digits, so a 2-digit escape is silently skipped everywhere. `fa-square-plus` (`U+F0FE`) is the same idea in the PUA range, and it matches the panel's square tiles besides.
-- **The subset font's url must keep its `?v=<hash>` tail.** An extension resource is cached by the browser under its full url, so regenerating `fa-solid-900-subset.woff2` without changing the url leaves every newly added glyph invisible — that is exactly how the size-setting icons once came up blank, and it looks like a broken `@font-face` rather than a cache. `.workbuddy/fa_subset.py` computes the font's SHA-256 and rewrites the tail in `newtab.css` automatically, so just re-run it and never edit that tail by hand; `.workbuddy/fa_verify.py` fails when the tail no longer matches the font on disk.
-- Icon coverage is verified end to end, so a blank tile cannot ship: `fa_verify.py` collects the icon names from **both** the `icon:` fields and the literal `class="fa-solid fa-x"` templates (the dialog's close button comes from the latter), then checks each one against the CSS rule, the font cmap, and — by drawing it through `BoundsPen` — that the glyph actually has contours. It also reports `.fa-*` rules nothing references, and any codepoint in the font the CSS never maps.
-- A tile of `kind: "number"` opens the input variant of the dialog: one text field, its placeholder built from `SEARCH_LIMITS` (never hard-coded), an error line that is always present (so revealing an error does not shift the button) and a confirm button that Enter also triggers. Validate with `isValidLimit()`, store the raw integer — a `0` is stored as `0`, not as the default, and `readLimit()` resolves it on every read so the tile and the field both report the default. Then call the matching `applySetting()` case; the tile re-renders and reports the resolved value.
-- A setting with **two** values is a `kind: "cycle"` tile: clicking it writes the other value and re-renders. Never route a two-option setting to the dialog — `.workbuddy/test_settings.js` asserts every `cycle` has exactly two options and every `select` at least three, so a two-option `select` cannot sneak back in.
-- Icons must be square PNGs and registered in `manifest.json.icons`. Chrome Web Store requires 16/48/128; Firefox requires 48/96.
-- The bottom sheet is the **only** rounded surface of the settings UI (`border-radius: 8px 8px 0 0` on its top edge). Everything inside it is right-angled — tiles, the value dialog, its close button and the square `.menu-radio` marker all use `border-radius: 0`. Keep it that way: a matching rounded corner on any inner surface reads as a mistake.
-- A tile is a **fixed square** whose side is the single token `--settings-tile` (in `:root`): `flex: 0 0 var(--settings-tile); width/height: var(--settings-tile)`. The panel has **no** `height` of its own — it is sized by the strip, and `.settings-content` carries `min-height: calc(var(--settings-tile) + 2.25rem)` so every tab yields the same panel height, even one holding a single tile (the Shortcuts tab with nothing saved is the current case). Retune the panel by editing that one token; nothing else needs to change.
-- The strip is scrollable but shows **no** scrollbar (`scrollbar-width: none` + `.settings-content::-webkit-scrollbar { display: none }`). At the shipped tile size a full tab is narrower than the strip on a normal window, so a visible bar would be dead weight; the wheel handler in `newtab.js` still maps `deltaY` to `scrollLeft` for narrow windows. Do not delete `overflow-x: auto` when hiding the bar.
-- The icon inside a tile is scaled to the tile: `1.5rem` for a `125px` tile (≈ one fifth of the side). If you change `--settings-tile`, rescale `.settings-card-icon`, `.settings-card-name` and `.settings-card-status` with it — a full-size icon in a quarter-size tile overflows the plate.
-- Inside a tile there is **no** divider between the icon plate and the label, and the glyph sits **slightly below** the plate's centre: `.settings-card-icon` uses `padding-top: 0.75rem`, which drops the centred glyph by 6px (the glyph stays centred in the padding box, so the offset is half the padding). Do not "fix" this by re-centring the icon or by adding a `border-top`, and keep the plate's `background` — it is the only thing separating the two zones.
-- The dialog's option list follows the same rule: **no rule between consecutive options**. `.settings-dialog-option:hover`'s fill is the only thing marking the row under the cursor, which is why the rows keep their `0.65rem` vertical padding rather than being tightened once the separator is gone. `test_settings.js` asserts that no `.settings-dialog-option` rule declares a `border-top` or a `border-bottom`.
-- The tab favicon (`house-regular-full.svg`) is **theme-aware inside the file**: an embedded `<style>` sets the ink with `@media (prefers-color-scheme: dark)`, matching `--fg` (#000 light / #fff dark). Do not drive it from JS or from `data-theme` — the tab strip follows the browser/OS colour scheme, not the page's theme, so a JS-swapped favicon would go dark on a dark tab strip. Note that Chrome suppresses favicons on the new tab page by design, so this may only be visible in Firefox or when `newtab.html` is opened directly.
-- The onboarding screenshots are **framed by CSS, not by their own dimensions**. The pair is shot separately and the two crops need not share an aspect ratio. `.onboarding-img` is a flex item (`flex: 1; min-height: 0`) inside the flex-column `.onboarding-col`, so its **box height** comes from whatever the title and subtitle leave over — the same in both themes, which is what keeps a theme flip from reflowing the panel. It also carries `align-self: center; width: auto; max-width: 100%`: without those the column's default `stretch` would hand both shots a full-width box, and the narrower one would sit inside it with empty strips against its border. To resize the preview, edit the display height (the flex box), never by padding a file up to match its partner.
+> **Both artifacts are built from HEAD. Commit before packaging, or you will ship the old content** — and the symptom is "I fixed it, but the same error comes back". Single-package manual equivalent:
+> `git -c core.autocrlf=false archive --format=zip -o ext-release.zip HEAD` (without `-c` you get CRLF).
 
-## Common Pitfalls
+### 7.2 The two manifests
 
-- Referring to a missing or non-square icon will block extension load.
-- MV3 requires `service_worker` (not `background.scripts`).
-- Don't reintroduce `browser.*` direct calls without a Firefox polyfill check.
-- Don't gate a browser API on a browser sniff (`isFirefox()`, a UA string) — probe the member you actually call. Firefox's `search.query` arrived in 111, so a sniff would either hide a working feature or offer a dead one.
-- `localStorage` is shared across all new-tab pages in the same profile, but each origin has its own. The extension's new tab runs at the extension origin, so values are persistent. **The toolbar popup shares that origin too** — which is the whole reason it can clear the sheet with no permission — and a same-origin write reaches every open copy of the page as a `storage` event.
-- CSS variables must be redeclared under both `:root` and `[data-theme="dark"]`; the `@media (prefers-color-scheme: dark)` block only covers `data-theme="auto"`.
+**The two browsers want different values, so the key lives in a second manifest.** Chromium accepts a homepage override only as an absolute http(s) URL — `CreateManifestURL()` in `settings_overrides_handler.cc` returns `nullopt` for anything else, and since `homepage` is then the only key under `chrome_settings_overrides`, `Parse()` fails and **the whole extension refuses to load** ("Invalid value for overriding homepage url"). Firefox is the opposite: a bundled page must be a path relative to the manifest. No single value satisfies both, and `browser_specific_settings` cannot fork manifest keys. So:
 
-## See Also
+- `manifest.json` (Chrome's, and the one a developer loads from the repo root) — **no `chrome_settings_overrides` at all**.
+- `manifest.firefox.json` — the same file plus that key.
+- `.gitattributes` keeps it out of both artifacts; `make_dist.py` swaps it in for the xpi; the suite asserts the two differ by that key **alone, key order included**.
 
-- `README.md` — user-facing installation + features.
-- `ASSET_AUDIT.md` — historical asset review and remaining cleanup tasks.
+Do not "tidy up" by moving the key back: the regression is not a warning at install time, it is a refusal to install.
+
+Two caveats outside this repo: Chrome's store policy makes settings overrides inconsistent with its single-purpose policy when other permissions are present (this extension declares `search`), and asks for the homepage's domain to be verified by the publishing account. Local unpacked loading is unaffected.
+
+### 7.3 Loading it
+
+**Chrome:** `chrome://extensions/` → Developer mode → "Load unpacked" → pick the project root → after a change click the refresh icon on the card → open a new tab.
+
+**Firefox:** `about:debugging#/runtime/this-firefox` → "Load Temporary Add-on…" → pick `dist-firefox.xpi`, or `manifest.json` to inspect the page alone. Re-load after each change (temporary add-ons don't persist).
+
+Picking `manifest.json` loads the directory, which is the shared, Chrome-safe manifest — **so that session has no homepage override**. Only the xpi carries `manifest.firefox.json`.
+
+> **Firefox has no persistent unpacked install.** Release/Beta have no switch at all; `xpinstall.signatures.required = false` works only on **ESR / Developer Edition / Nightly**, and it must be the boolean `false`. Both artifacts are **unsigned** (no `META-INF/`), and signing covers the bytes, so re-packaging invalidates a signature → a persistent install goes through AMO self-distribution (unlisted). **A source zip can never be installed directly**: GitHub's "Download ZIP" wraps everything in `dotStart-main/` (Firefox needs `manifest.json` at the root) and — confirmed by test — honours `.gitattributes`' `export-ignore`, so the archive contains no `manifest.firefox.json` and its `manifest.json` is the Chrome-safe one.
+
+### 7.4 Icons, cached resources, and blank tiles
+
+If an icon comes up blank while the rest of a change is visible, **suspect a cached resource before the CSS**: the subset font is the only font, and its `?v=` tail is what makes a regenerated copy take effect. A hard reload settles anything else.
+
+### 7.5 Common pitfalls
+
+- A missing or non-square icon will **block extension load**.
+- MV3 requires `service_worker`, not `background.scripts` (this project has neither — don't add one).
+- Don't reintroduce direct `browser.*` calls without a Firefox polyfill check.
+- Don't gate a browser API on a browser sniff — probe the member you actually call (§4.3).
+- `localStorage` is shared across all new-tab pages in the same profile, and the toolbar popup shares the extension origin — which is exactly why it can clear the sheet with no permission.
+- CSS variables must be redeclared under **both** `:root` and `[data-theme="dark"]`; the `@media (prefers-color-scheme: dark)` block only covers `data-theme="auto"`.
+
+---
+
+## 8. Reference
+
+### 8.1 `.workbuddy/` contents (local scratch — never ships, never committed)
+
+The folder name is historical. Treat it as the project's `tools/` directory: it holds the only test coverage and the build script, so it matters more than its gitignored status suggests.
+
+| Path | What it is |
+| --- | --- |
+| `test_settings.js` | The 385-assertion smoke suite (§5). |
+| `neg_check.js` | The negative-validation harness (§5.4). |
+| `fa_subset.py` | Regenerates the icon font and stamps the `?v=` cache-buster (§4.4). |
+| `fa_verify.py` | End-to-end icon gate: CSS rules ↔ font cmap ↔ glyph outlines. |
+| `make_dist.py` | Builds and verifies both artifacts (§7.1). |
+| `make_icon.py` | Draws the mark and writes `favicon.svg` + the five icon PNGs from one set of numbers (§4.5). Needs Pillow and a Chrome binary. |
+| `asset_audit.py` | Regex-based asset audit. **False positives by design** — see §3. |
+| `make_stage_preview.js` | Renders the gate + editor as a standalone page, sourcing CSS and strings from the real files. Exists because the layout cannot be verified in a browser here. |
+| `fa/all.min.css`, `fa/fa-solid-900.woff2` | Upstream Font Awesome 7.3.1 sources — **inputs** to `fa_subset.py`, not shipped. Keep them. |
+| `memory/` | Project notes: `MEMORY.md` (operational rules), `DETAILS.md` (history and rejected options), dated daily logs. |
+| `tmp/`, `tmp/bak/` | Scratch. **`tmp/bak/` must exist** — the patch-and-restore convention in §3 backs up into it. |
+
+Every script finds the repo root from its own location (`__dirname` / `__file__`), so none of them break if the folder is renamed or moved.
+
+### 8.2 Documentation map
+
+- **This file** — agent-facing: structure, invariants, traps, harness.
+- `README.md` — user-facing: install steps and the feature list.
+- `ASSET_AUDIT.md` — the historical asset review; only the state table is still authoritative.
+- `.workbuddy/memory/MEMORY.md` — the compressed operational rules; `DETAILS.md` holds the *why* behind the traps in §3, including rejected designs. Read the matching section before re-litigating a decision. **Note:** these notes were written against one particular agent tool and contain vendor-specific paths and commands; take the project reasoning, not the tooling details, from them.
+
+### 8.3 This machine's environment
+
+Everything below is a property of **this workstation**, not of the project — if you are running somewhere else, these paths and quirks do not apply. They are recorded because rediscovering them costs many round trips.
+
+- Remote: `https://github.com/alt021/dotStart.git` (branch `main`). Commit as `AmeXE2 <penbead@outlook.com>`.
+- **Pushing needs two things**: the system HTTP proxy `http://127.0.0.1:7897` (the proxy visible in the environment variables is a sandbox's and cannot reach GitHub), and explicit credential-helper selection, because the empty `credential.helper` in `.gitconfig` clears the chain — the credential lives in the Windows Credential Manager under `alt021`:
+  `git -c credential.helper="…/PortableGit/versions/1.2.0/mingw64/bin/git-credential-wincred.exe" -c http.proxy=http://127.0.0.1:7897 push origin main`
+- **Shell PATH** — the shell here may start without its usual environment, so `ls` / `grep` report "not found". Prepend the toolchain directories in the same command:
+  `export PATH="/c/Users/AmeXE2/.workbuddy/binaries/PortableGit/versions/1.2.0/{cmd,bin,usr/bin}:/c/Windows/System32:/c/Windows:$PATH"`
+- **Interpreters** — node `~/.workbuddy/binaries/node/versions/22.22.2-6/node.exe`; Python venv `~/.workbuddy/binaries/python/envs/default`, whose Windows interpreter is `Scripts/python.exe` (has Pillow; quantise screenshots with `Image.FASTOCTREE` only, and the icon subsetter needs `fonttools[woff]` + `brotli`; `cairosvg` is installed but cannot load libcairo, which is why `make_icon.py` rasterises through Chrome). The `.workbuddy/binaries/…` prefix is a local toolchain cache, unrelated to the project folder of the same name.
+- **No usable browser for automation** — only Thorium (portable) and Firefox ESR are installed and Playwright has no browser, so the extension cannot be loaded or screenshotted by a script here. Verify logic with the test suite; leave UI checks to the user.
+- **One sandbox denied the runtime all child processes** (`spawnSync` → `EBUSY`), which disables `neg_check.js` entirely (§5.4). A Python `subprocess` driver works around it.

@@ -2,85 +2,13 @@
 
 审查日期：2026-09-09 · 版本：2.1.0 · 审查范围：全部纳入扩展包的文件与资源
 
-> **状态（2026-09-11 更新）**：本报告的发现已按第八节执行完毕，除 P3（拆分 `newtab.js`）外全部落地。
-> 第二至七节保留的是**审查当时**的现场记录，其中若干资产已在本轮清理中删除或改写（`guide.md` 已删、`showDots` 已迁移、`MIT_LICENSE` 已改为读取 `LICENSE`、彩蛋文本已外置为 `EASTER.MD` 并最终硬编码为 `EASTER_CONTENT`）。
-> 阅读时请以**第八节的状态表**为准。
+> **状态（2026-10-02 整理）**：本报告的发现已按下方状态表执行完毕，除 P3（拆分 `newtab.js`）外全部落地。
+>
+> 审查当时的现场记录（原第二至七节）已在 2026-10-02 的清理中删除。它们记录的是**审查那一刻**的现场，其中几乎每一条此后都被推翻或改写：`guide.md` 已删、`showDots` 已迁移并移除、`MIT_LICENSE` 常量已改为运行时读 `LICENSE`、`extName` 死资源已启用、`tabs` / `bookmarks` / `history` 已从清单移除、缺 16/128 图标已补齐、两张截图已统一尺寸、`\uXXXX` 转义已还原为真实中文、彩蛋文本已外置并最终硬编码。留着它们只会让后来者读到一份与实际代码相反的清单。
+>
+> 下面这份状态表是本文件唯一仍具权威性的部分：它记录**改了什么、为什么、落在哪个 commit**。
 
-## 一、资产总览
-
-| 资产 | 尺寸/规格 | 大小 | 引用方 | 状态 |
-| --- | --- | --- | --- | --- |
-| `icon-48.png` | 48×48 | 3.4 KB | `manifest.icons.48` | 正常 |
-| `icon-96.png` | 96×96 | 8.9 KB | `manifest.icons.96` | 正常 |
-| `icon.png` | 256×256 | 32 KB | `manifest.icons.256` | 警告（缺 16/128） |
-| `scrshot-light.png` | 1147×637 | 55 KB | 引导页第 3 屏 | 警告（尺寸不一致） |
-| `scrshot-dark.png` | 1129×621 | 45 KB | 引导页第 3 屏 | 警告（尺寸不一致） |
-| `_locales/en/messages.json` | 2 条消息 | 182 B | 仅 `extDescription` | 警告（extName 死资源） |
-| `_locales/zh_CN/messages.json` | 2 条消息 | 175 B | 仅 `extDescription` | 警告（extName 死资源） |
-| `src/newtab.js` | 1223 行 | 49 KB | `newtab.html` | 风险 |
-| `src/newtab.css` | 77 个类 | 18 KB | `newtab.html` | 正常（无孤立样式） |
-| `newtab.html` | 13 行 | 336 B | manifest newtab | 正常 |
-| `manifest.json` | MV3 | 511 B | — | 见第三节 |
-| `README.md` / `AGENTS.md` / `guide.md` / `LICENSE` | — | 3.1 KB | 仅人工阅读 | 见第四节 |
-
-扩展包总计约 **190 KB**，其中图片资产 **145 KB（76%）**。
-
-## 二、死资产与未引用资源
-
-1. **`extName` 消息键（en / zh_CN 各一份）** — manifest 中 `name` 硬编码为 `dotStart`，从未使用 `__MSG_extName__`。两条消息的值为 `"N3w P4ge by AmeXE2"`，是旧产品名的遗留。**建议**：要么在 manifest 改用 `"name": "__MSG_extName__"` 并把值统一成 `dotStart`，要么直接删除这两个键。
-
-2. **`showDots` 存储键** — `STORAGE_KEYS.showDots` 已定义且仍在 `updateDots()` / `getMenuHTML()` 中作回退读取，但 UI 上已无任何写入入口（菜单里只有 `backgroundStyle`）。属于僵尸配置项，仅对老用户生效。**建议**：加一段一次性迁移（读到 `showDots` 时写入 `backgroundStyle` 并删除），或直接移除回退逻辑。
-
-3. **CSS 无孤立类** — 已交叉比对 77 个 CSS 类与 JS/HTML 中的类名，未发现只定义不使用的样式。`.checked` / `.selected` 经三元表达式动态生成，属正常。
-
-## 三、重复维护（漂移风险）
-
-| 内容 | 副本 1 | 副本 2 | 风险 |
-| --- | --- | --- | --- |
-| 版本号 `2.1.0` | `manifest.json` | `newtab.js` 彩蛋文本 `GUIDE_CONTENT_ZH/EN` | 发版必漏改一处 |
-| MIT 许可证全文 | `LICENSE` | `newtab.js` 的 `MIT_LICENSE` 常量（约 1 KB） | 改许可证需同步两处 |
-| 发行日志 / 仓库地址 | `guide.md` | `newtab.js` 彩蛋文本 | 已出现偏差：guide 用 `<扩展程序版本号>` 占位，JS 里写死 2.1.0 |
-| 引导页文案 | `ONBOARDING_I18N`（JS 内） | 无外部来源 | 翻译只能改代码 |
-| 主题色 token（`--bg` / `--fg` / `--border` / `--muted`） | `src/newtab.css`（每个主题块各一份） | `src/popup.css` 重述 4 个 token × 3 个主题块 | 工具条面板的底色/字色与页面漂移。**已缓解**：`test_settings.js` 断言 popup.css 出现的每个色值都逐字存在于 `newtab.css`，改错一边即 FAIL |
-| 工具条按钮文案 | `_locales/en\|zh_CN/messages.json` 的 `actionTitle` + `src/newtab.js` 的 `I18N.actionTitle` | `src/popup.js` 的 `POPUP_I18N.*.clear` | 三处必须同名（对话框里的告诫文案正是引用这个串）。**已缓解**：`test_settings.js` 断言三者相等，且 popup 的存储键字面量必须等于 `STORAGE_KEYS.customCSS` |
-
-**建议**：把彩蛋里的版本、仓库、日志改为从 `chrome.runtime.getManifest().version` 与单一常量读取；MIT 全文改为运行时 `fetch()` 同目录 `LICENSE`（扩展页面允许同源读取）或直接保留一份、删除另一份。
-
-## 四、文档资产问题
-
-- **`AGENTS.md` 严重过时**：仍描述为"search + theme toggle logic"，而实际代码含 5 个模块（搜索、右键菜单、书签/历史侧边栏、首次引导、彩蛋）。未提及 `_locales`、Firefox 兼容分支（`isFirefox()`）、`scrshot-*.png` 资产、以及 `permissions` 中实际申请的 `tabs`/`bookmarks`/`history`。AI 协作者按此文件工作会持续产生错误假设。
-- **`guide.md` 被 `.gitignore` 忽略**：文件在磁盘上但不入库，其内容又被硬编码进 JS。等于存在"第三份"事实来源，且克隆仓库的人看不到。
-- **`README.md` 未写仓库地址**：实际 remote 为 `https://github.com/alt021/dotStart`（与彩蛋一致），但 README 里查不到。
-- **命名差异（非冲突）**：GitHub 账户 ID 为 `alt021`（仓库 `alt021/dotStart`、git remote 仍指向此账号）；显示名 / 作者署名为 `AmeXE2`；Firefox 扩展 ID 用 `dotstart@amexe2.github.io` 是因为 GitHub Pages 域绑定到 `amexe2.github.io`。三者属于不同维度，不需要保持一致。
-
-## 五、图标与截图规范
-
-- **缺 `16` 与 `128` 尺寸**：Chrome 网上应用店要求提供 128×128；16 用于扩展管理页与右键菜单。当前只有 48/96/256，Chrome 会缩放，Firefox 会在验证时提示。
-- **两张截图尺寸不一致**（1147×637 vs 1129×621，宽高比 1.80 vs 1.82）：引导页第 3 屏同时插入两张 `<img>`，靠主题类切换显示。尺寸差异会造成切换主题时的布局微跳。**建议**重新截取为同一画布尺寸（如统一 1200×675），并考虑压缩——两张共 100 KB，占包体一半以上。
-
-## 六、代码资产可维护性
-
-`src/newtab.js` 49 KB / 1223 行，是**构建产物形态的源文件**：
-
-- 中文文案全部转义成 `\u663E\u793A\u6807\u9898` 形式（esbuild 等工具的输出特征），且带 `/* @__PURE__ */` 标记；
-- 但 README 明确写了"移除对 npm 的依赖"，即已无构建步骤。
-
-结果是**源码不可读也不可直接编辑**——想改一句中文提示得先反查 Unicode 码点。这是本项目最大的技术债。
-
-**建议**（按成本从低到高）：
-1. 用一次性脚本把 `\uXXXX` 还原为真实中文字符提交（风险最低，立刻可读）；
-2. 或重新引入构建：保留可读的 `src/` 源文件，输出到 `dist/`，manifest 指向 `dist/`；
-3. 至少将 `I18N` / `ONBOARDING_I18N` / `GUIDE_*` 拆到独立的 `src/i18n.js`，让文案与逻辑分离。
-
-另外，单文件 1223 行里混杂了 DOM 构建、右键菜单、侧边栏、引导流程、彩蛋五套相互独立的 UI，后续任何改动都容易互相踩到。
-
-## 七、其他发现
-
-- **未提交改动**：`src/newtab.js` 有 1 行未提交（`isFirefox()` 判断从 `browser.runtime` 加固为 `browser.runtime?.getBrowserInfo`）。git 因目录属主问题拒绝操作，需执行 `git config --global --add safe.directory D:/OpenCode/New-page`。
-- **Firefox 兼容性缺口**：默认搜索引擎 `browser` 走 `chrome.search.query()`，该 API 是 Chrome 87+ 专有，Firefox 无对应实现（`browser.search` 接口不同），且 Firefox 不识别 `search` 权限。因此在 Firefox 上选"跟随浏览器"会静默无响应。**建议**在 `isFirefox()` 时隐藏该选项或回退到某个具体引擎。
-- **权限偏大**：申请了 `tabs` + `bookmarks` + `history` 三项，其中 `history`/`bookmarks` 仅在侧边栏开启时使用。Firefox 不支持 `optional_permissions` 动态申请，但 Chrome 可考虑改为可选权限以降低安装时的权限提示压力。
-
-## 八、建议动作与执行状态
+## 建议动作与执行状态
 
 | 优先级 | 动作 | 状态 | 实现位置 |
 | --- | --- | --- | --- |
@@ -103,13 +31,19 @@
 | 2026-09-11 | 新增 `house-regular-full.svg` 作为主题感知 favicon | `c4e4f34` |
 | 2026-09-11 | 权限收敛：删掉未使用的 `tabs`；`bookmarks` / `history` 转入 `optional_permissions`，首次打开侧边栏时申请 | `489a5b9` |
 | 2026-09-11 | Firefox 快捷入口定案：整行（含菜单开关）与侧边栏外部链接在 Firefox 下不提供 | `c03e2c5` |
-| 2026-09-20 | 自定义 CSS 的首次启用加 8 秒确认阶段；新增扩展工具栏按钮弹窗（`popup.html` + `src/popup.js` + `src/popup.css`）一键清除；已打开的页面通过 `storage` 事件实时恢复（零新增权限） | 本轮 |
+| 2026-09-20 | 自定义 CSS 的首次启用加 8 秒确认阶段；新增扩展工具栏按钮弹窗（`popup.html` + `src/popup.js` + `src/popup.css`）一键清除；已打开的页面通过 `storage` 事件实时恢复（零新增权限） | `17e4015` … `7cbac39` |
+| 2026-09-21 | 主页覆盖移到 `manifest.firefox.json`（Chrome 拒绝装载带 homepage 的清单）；`make_dist.py` 由 HEAD 生成两个原生 `git archive` 产物 | `31e711c` |
+| 2026-09-30 | 声明 `gecko.data_collection_permissions.required = ["none"]`，并把 `strict_min_version` 由 109.0 提到 128.0（≤127 遇到该键是**报错**而非忽略） | `56aa590` |
+| 2026-10-02 | 清理 Agent 侧文件：删除一次性临时产物与失效脚本、已回退功能（更新检测）的记忆与注释残留、本报告已被推翻的现场记录 | 本轮 |
+| 2026-10-25 | 新品牌标：方框（页面）+ 红点（句点），仅黑白红三色。`favicon.svg` 取代 Font Awesome 房子图标（暗色下描边转白）；五张扩展图标由同一组几何常数生成，改为黑底 + 白框 + 红点，解决"透明 PNG 在深色工具栏上消失"的问题 | 未提交 |
 
 ### 仍未解决
 
-- **`newtab.js` 仍是单文件约 1730 行**（P3）。多套独立 UI 混居一处，改动易互相干扰。建议后续拆为 `i18n` / `search` / `menu` / `settings-dialog` / `onboarding` / `easter-egg` 模块。
-- **Chrome 新标签页可能不显示 favicon**：Chrome 有意在 NTP 不渲染 favicon，`house-regular-full.svg` 大概率只在 Firefox 或直接打开 `newtab.html` 时可见。如需在 Chrome 也更换视觉标识，唯一杠杆是重新生成 `manifest.json` 的 `icons`（PNG，无法随主题变色）。**尚未决定**。
+- **`newtab.js` 仍是单文件约 1755 行**（P3）。多套独立 UI 混居一处，改动易互相干扰。建议后续拆为 `i18n` / `search` / `menu` / `settings-dialog` / `onboarding` / `easter-egg` 模块。**AGENTS.md §1.3 已给出按函数族的模块映射表，可作为拆分蓝本。**
+- **Chrome 新标签页不渲染 favicon（有意为之）**：`favicon.svg` 基本只在 Firefox 或直接打开 `newtab.html` 时可见。Chrome 侧的视觉标识只能由 `manifest.json` 的 `icons` 承担，已于 2026-10-25 随新图标一并处理；PNG 无法随主题变色，所以那五张是黑底白框而不是透明墨色（理由见 AGENTS.md §4.5）。
 
 ---
 
 复跑审计：`.workbuddy/asset_audit.py`（检查孤立 CSS 类、i18n 键一致性、图片尺寸、locale 消息引用情况）。注意该脚本为本地工具，位于 `.workbuddy/`（已被 gitignore），不入库。
+
+> 该脚本用正则扫源码，**看不到运行时拼出的类名**：设置面板的 `icon:` 字段、`cardHTML()` 生成的 `.settings-card*`、`itemStatus()` 动态加上的 `.selected` 都会被它报成"未使用"。图标覆盖率请以 `.workbuddy/fa_verify.py` 为准（它同时核对 CSS 规则、字体 cmap 与字形轮廓），不要照抄这个列表去删样式。

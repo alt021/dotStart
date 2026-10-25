@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/logo-dark.svg">
+    <img src="docs/logo.svg" alt="dotStart" width="360">
+  </picture>
+</p>
+
 # dotStart
 
 一个 现代 · 极简 · 干净 的新标签页

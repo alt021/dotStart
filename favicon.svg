@@ -16,5 +16,5 @@
     }
   </style>
   <rect class="ink" x="48" y="48" width="160" height="160" stroke-width="26"/>
-  <circle cx="128" cy="128" r="35" fill="#e5342a"/>
+  <circle cx="128" cy="128" r="28" fill="#e5342a"/>
 </svg>

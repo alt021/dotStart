@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <!-- dotStart with white ink, for a page whose theme the user forced to dark.
+       newtab.js swaps this in for favicon.svg when data-theme is dark; the
+       scheme-aware file handles every other theme by itself.
+       Regenerate with .workbuddy/make_icon.py. -->
+  <rect x="48" y="48" width="160" height="160" fill="none" stroke="#fff" stroke-width="26"/>
+  <circle cx="128" cy="128" r="28" fill="#e5342a"/>
+</svg>

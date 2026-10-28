@@ -259,9 +259,22 @@ function getLang() {
   setStored(STORAGE_KEYS.lang, detected);
   return detected;
 }
+// favicon.svg flips its ink with prefers-color-scheme, which is what the tab
+// strip follows, but that query cannot see a theme the user forced on the page:
+// dark on a light scheme would still get black ink. So the forced dark theme
+// swaps in the all-white file, and every other theme points back at the
+// scheme-aware one.
+const FAVICON_SVG = "./favicon.svg";
+const FAVICON_DARK_SVG = "./favicon-dark.svg";
+function updateFavicon(theme) {
+  const link = document.querySelector('link[rel="icon"]');
+  if (!link) return;
+  link.href = theme === "dark" ? FAVICON_DARK_SVG : FAVICON_SVG;
+}
 function applyTheme(theme) {
   document.documentElement.setAttribute("data-theme", theme);
   setStored(STORAGE_KEYS.theme, theme);
+  updateFavicon(theme);
 }
 function updatePrompt() {
   const prompt = document.querySelector(".prompt");

@@ -38,11 +38,12 @@
 | 2026-10-25 | 新品牌标：方框（页面）+ 红点（句点），仅黑白红三色。`favicon.svg` 取代 Font Awesome 房子图标（暗色下描边转白）；五张扩展图标由同一组几何常数生成，改为黑底 + 白框 + 红点，解决"透明 PNG 在深色工具栏上消失"的问题 | `8f564b0` |
 | 2026-10-25 | 图标清晰度：每个尺寸改为按**自身像素网格**绘制（外框、描边、圆点全部取整），4× 超采样后 `BOX` 下采样，取代"从 256 网格缩放"；`chrome://extensions` 里那圈灰边（边缘半覆盖像素）消失。README 顶部增加品牌横幅 `docs/logo.svg` / `docs/logo-dark.svg`（裸形图标 + `dotStart` 字标；字标为轮廓而非 `<text>`，否则排版会随读者字体漂移），由 `make_logo.py` 生成，`<picture>` 按 GitHub 主题切换 | 本轮 |
 | 2026-10-27 | 扩展图标呈现方式：去掉整块底板，改为**白纸 + 黑框 + 红句点，外缘透明**。浅色工具栏靠黑框成形、深色靠白纸成形，不再像录音/停止键；句点半径 35 → 28（更像句号）。图标、`favicon.svg`、README 横幅由同一组常数重生成 | 本轮 |
+| 2026-10-28 | 新增 `favicon-dark.svg`：**白框 + 红点**，不带媒体查询。`favicon.svg` 仍靠 `prefers-color-scheme` 自行换墨；只有页面 `data-theme` 被设为 `dark` 时，`updateFavicon()` 才把 icon 链接指向白框文件（这一偏好到不了媒体查询），其余主题一律指回 `favicon.svg`。两份 SVG 由 `make_icon.py` 同一组常数生成 | 本轮 |
 
 ### 仍未解决
 
-- **`newtab.js` 仍是单文件约 1755 行**（P3）。多套独立 UI 混居一处，改动易互相干扰。建议后续拆为 `i18n` / `search` / `menu` / `settings-dialog` / `onboarding` / `easter-egg` 模块。**AGENTS.md §1.3 已给出按函数族的模块映射表，可作为拆分蓝本。**
-- **Chrome 新标签页不渲染 favicon（有意为之）**：`favicon.svg` 基本只在 Firefox 或直接打开 `newtab.html` 时可见。Chrome 侧的视觉标识只能由 `manifest.json` 的 `icons` 承担，已于 2026-10-25 随新图标一并处理；PNG 无法随主题变色，所以那五张是**白纸 + 黑框、外缘透明**，而不是全透明的墨色描边——浅色工具栏靠黑框、深色靠白纸（理由见 AGENTS.md §4.5）。
+- **`newtab.js` 仍是单文件约 1768 行**（P3）。多套独立 UI 混居一处，改动易互相干扰。建议后续拆为 `i18n` / `search` / `menu` / `settings-dialog` / `onboarding` / `easter-egg` 模块。**AGENTS.md §1.3 已给出按函数族的模块映射表，可作为拆分蓝本。**
+- **Chrome 新标签页不渲染 favicon（有意为之）**：`favicon.svg` / `favicon-dark.svg` 基本只在 Firefox 或直接打开 `newtab.html` 时可见。Chrome 侧的视觉标识只能由 `manifest.json` 的 `icons` 承担，已于 2026-10-25 随新图标一并处理；PNG 无法随主题变色，所以那五张是**白纸 + 黑框、外缘透明**，而不是全透明的墨色描边——浅色工具栏靠黑框、深色靠白纸（理由见 AGENTS.md §4.5）。
 
 ---
 

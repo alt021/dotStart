@@ -157,7 +157,7 @@ Each of these has actually bitten. They are ordered by how often they recur.
 
 - Every user-visible string lives in `I18N` or `ONBOARDING_I18N` with parallel `en`/`zh` keys; `t(key)` reads it, `fmt(str, vars)` fills `{min}`-style slots.
 - `LICENSE` is a **file**, read by `loadLicenseText()` (cached). The Easter-egg text is the opposite: hard-coded in `EASTER_CONTENT` so the extension needs no loose data file.
-- `EASTER_CONTENT` is one **bilingual** text shared by all languages. Headings stay inline (`**# 仓库 Repository**`); taglines and release notes stack the two languages on separate lines so no line mixes zh and en. Blank lines are meaningful (each becomes a `<br>`) — they set the vertical rhythm. No HTML comments: they would be injected as-is.
+- `EASTER_CONTENT` is one **bilingual** text shared by all languages. Headings stay inline (`**# 仓库 Repository**`); taglines and closing notes stack the two languages on separate lines so no line mixes zh and en. Blank lines are meaningful (each becomes a `<br>`) — they set the vertical rhythm. No HTML comments: they would be injected as-is.
 - The crawl runs at a fixed `EASTER_CRAWL_SPEED` (150 px/s); the duration is computed from the measured content height and the keyframe ends at `translateY(calc(-100% - 100vh))`. **Do not go back to a fixed duration or a fixed `-200%`** — that made speed depend on text length and left a blank screen each loop.
 
 ### 4.2 UI structure

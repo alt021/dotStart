@@ -26,8 +26,9 @@ const SEARCH_URLS = {
 };
 const SEARCH_ENGINES = ["browser", "google", "duckduckgo", "qwant", "bing", "baidu"];
 // Search box styles. "modern" replaced the old square + rounded pair, "geek"
-// replaced the old underline ("line") style.
-const SEARCH_STYLES = ["modern", "geek"];
+// replaced the old underline ("line") style, and "glow" is a borderless opaque
+// card that sits off the page on a wide soft shadow.
+const SEARCH_STYLES = ["modern", "geek", "glow"];
 // Old value -> new value. getStored() would fall back to "modern" for any
 // unknown value, which would silently promote underline users, so map instead.
 const LEGACY_SEARCH_STYLES = { square: "modern", rounded: "modern", line: "geek" };
@@ -92,6 +93,7 @@ const I18N = {
     searchStyle: "Search Box Style",
     modern: "Modern",
     geek: "Geek",
+    glow: "Glow",
     searchRadius: "Corner Radius",
     searchBorder: "Border Weight",
     searchLength: "Box Length",
@@ -158,6 +160,7 @@ const I18N = {
     searchStyle: "搜索框样式",
     modern: "现代",
     geek: "极客",
+    glow: "光影",
     searchRadius: "圆角大小",
     searchBorder: "框线粗细",
     searchLength: "搜索框长度",
@@ -391,17 +394,18 @@ function updateSearchStyle() {
   const form = document.getElementById("search-form");
   if (!form) return;
   const style = getStored(STORAGE_KEYS.searchStyle, SEARCH_STYLES, "modern");
-  form.classList.remove("style-modern", "style-geek");
+  form.classList.remove("style-modern", "style-geek", "style-glow");
   form.classList.add(`style-${style}`);
   // Sizes travel to CSS as custom properties (see newtab.css). They go on the
   // ROOT element, not on the form: custom properties only inherit downwards, and
   // `.main` -- an ancestor of the form -- sizes its own max-width from
   // --search-length so the box can actually reach the configured width. A
   // variable set on the form would be invisible there. The radius is written for
-  // both styles -- it is inert on the underline style, and writing it
-  // unconditionally keeps a style switch from losing the value. The transparency
-  // could live on the form (its rule, `.search-box`, is a descendant) but rides
-  // along here so all four settings are published in one place.
+  // every style -- it is inert on the underline alone, and writing it
+  // unconditionally keeps a style switch from losing the value. The
+  // transparency could live on the form (its rule, `.search-box`, is a
+  // descendant) but rides along here so all four settings are published in one
+  // place.
   const root = document.documentElement.style;
   root.setProperty("--search-radius", styleValue(STORAGE_KEYS.searchRadius, SEARCH_LIMITS.radius));
   root.setProperty("--search-border", styleValue(STORAGE_KEYS.searchBorder, SEARCH_LIMITS.border));
@@ -911,25 +915,29 @@ function getSettingsItems(tab) {
     const items = [
       { action: "set-engine", icon: "fa-magnifying-glass", labelKey: "searchEngine", kind: "select", key: STORAGE_KEYS.searchEngine, fallback: "browser",
         options: engineOptions() },
-      { action: "set-style", icon: "fa-shapes", labelKey: "searchStyle", kind: "cycle", key: STORAGE_KEYS.searchStyle, fallback: "modern",
+      // Three styles, so this is a menu rather than the in-place flip a
+      // two-value setting gets.
+      { action: "set-style", icon: "fa-shapes", labelKey: "searchStyle", kind: "select", key: STORAGE_KEYS.searchStyle, fallback: "modern",
         options: SEARCH_STYLES.map((s) => [s, s]) }
     ];
     // The numeric settings are sandwiched between the style selector and the
-    // Search button. Only the corner radius depends on the style -- it means
-    // nothing on an underline, so it is offered for "modern" alone; the border
-    // weight, the box length and the transparency are common to both.
-    if (style === "modern") {
+    // Search button, and each is offered only where it means something: the
+    // corner radius to the two rounded styles (the underline is square by
+    // definition), the border weight to the two framed styles (the glow card is
+    // deliberately borderless), and the length and transparency to all three --
+    // the fade wraps the whole box, so it reads the same on a frame, an
+    // underline and a card.
+    if (style === "modern" || style === "glow") {
       items.push({ action: "set-radius", icon: "fa-border-top-left", labelKey: "searchRadius", kind: "number",
         key: STORAGE_KEYS.searchRadius, spec: SEARCH_LIMITS.radius });
     }
+    if (style === "modern" || style === "geek") {
+      items.push({ action: "set-border", icon: "fa-border-all", labelKey: "searchBorder", kind: "number",
+        key: STORAGE_KEYS.searchBorder, spec: SEARCH_LIMITS.border });
+    }
     items.push(
-      { action: "set-border", icon: "fa-border-all", labelKey: "searchBorder", kind: "number",
-        key: STORAGE_KEYS.searchBorder, spec: SEARCH_LIMITS.border },
       { action: "set-length", icon: "fa-text-width", labelKey: "searchLength", kind: "number",
         key: STORAGE_KEYS.searchLength, spec: SEARCH_LIMITS.length },
-      // Transparency is the one extra that both styles get: the fade wraps the
-      // whole box rather than its frame, so it reads the same on a full box and
-      // on a bare underline.
       { action: "set-transparency", icon: "fa-droplet", labelKey: "searchTransparency", kind: "number",
         key: STORAGE_KEYS.searchTransparency, spec: SEARCH_LIMITS.transparency },
       { action: "toggle-go", icon: "fa-arrow-right", labelKey: "showGo", kind: "toggle", key: STORAGE_KEYS.showGo, fallback: "true" }

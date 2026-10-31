@@ -56,7 +56,7 @@ Read this instead of skimming 1768 lines. Line numbers are approximate; function
 
 | # | Block | Key names | Notes |
 | --- | --- | --- | --- |
-| 1 | **Constants** (`:1–196`) | `STORAGE_KEYS`, `SEARCH_URLS`, `SEARCH_ENGINES`, `SEARCH_STYLES`, `LEGACY_SEARCH_STYLES`, `SEARCH_LIMITS`, `SHORTCUT_MAX`, `SHORTCUT_WEIGHT`, `SHORTCUT_TITLE_MAX`, `I18N`, `ONBOARDING_I18N` | `I18N` holds **128 keys × 2 languages**. `SEARCH_LIMITS` is the single source of truth for every numeric range and default (§6.2). |
+| 1 | **Constants** (`:1–196`) | `STORAGE_KEYS`, `SEARCH_URLS`, `SEARCH_ENGINES`, `SEARCH_STYLES`, `LEGACY_SEARCH_STYLES`, `SEARCH_LIMITS`, `SHORTCUT_MAX`, `SHORTCUT_WEIGHT`, `SHORTCUT_TITLE_MAX`, `I18N`, `ONBOARDING_I18N` | `I18N` holds **65 keys × 2 languages**. `SEARCH_LIMITS` is the single source of truth for every numeric range and default (§6.2). |
 | 2 | **Storage & migration** (`:197–226`) | `t`, `fmt`, `getStored`, `setStored`, `migrateLegacySettings` | Everything persists to **`localStorage`** — there is no `chrome.storage` anywhere. |
 | 3 | **Detection** (`:227–261`) | `detectBrowserLang`, `defaultEngineAPI`, `applyDocumentLang`, `getLang` | `defaultEngineAPI()` probes **the method**, not the namespace (§4.3). |
 | 4 | **Theming & core UI updates** (`:262–367`) | `updateFavicon`, `applyTheme`, `updatePrompt`, `updateTime`, `updateDots`, `updateClickFx`, `onMouseDown`, `updateGo`, `updateShortcuts` | One `update*()` per persisted option. `applyTheme()` also picks the favicon file (§4.5). |
@@ -82,11 +82,11 @@ Read this instead of skimming 1768 lines. Line numbers are approximate; function
 | `showGo` | `true` | Show the search (Go) button |
 | `clockFormat` | `24h` | `12h` / `24h` |
 | `searchEngine` | `browser` | `browser` / `google` / `duckduckgo` / `qwant` / `bing` / `baidu` |
-| `searchStyle` | `modern` | `modern` (boxed) / `geek` (underline) |
-| `searchRadius` | `8` | px, **`modern` only**. 1–60, or `0` = default |
-| `searchBorder` | `1` | px, both styles. 1–10, or `0` = default |
-| `searchLength` | `500` | px, both styles. 200–1200, or `0` = default |
-| `searchTransparency` | `0` | %, both styles. 1–100, or `0` = default. **The one setting whose default is `0` itself** |
+| `searchStyle` | `modern` | `modern` (boxed) / `geek` (underline) / `glow` (borderless shadowed card) |
+| `searchRadius` | `8` | px, **`modern` and `glow` only**. 1–60, or `0` = default |
+| `searchBorder` | `1` | px, `modern` and `geek` only (`glow` is borderless). 1–10, or `0` = default |
+| `searchLength` | `500` | px, all three styles. 200–1200, or `0` = default |
+| `searchTransparency` | `0` | %, all three styles. 1–100, or `0` = default. **The one setting whose default is `0` itself** |
 | `backgroundStyle` | `blank` | `blank` / `dots` / `stripes` |
 | `showClickFx` | `true` | Click ripple |
 | `shortcuts` | `[]` | JSON array, ≤4 `{title, url, weight}` — the only non-scalar key (§6.4) |
@@ -261,18 +261,20 @@ Read the subsection for whatever you touch.
 
 ### 6.2 Search box sizing
 
-Two styles; the sizes are `localStorage` numbers published by `updateSearchStyle()` as CSS custom properties **on `document.documentElement`**.
+Three styles; the sizes are `localStorage` numbers published by `updateSearchStyle()` as CSS custom properties **on `document.documentElement`**. Each style is offered only the controls that mean something on its frame (`getSettingsItems()` decides), so the style tile is a `select` menu rather than the in-place `cycle` it used to be.
 
 | Style | Frame | Custom properties |
 | --- | --- | --- |
 | `modern` | Full box with a blur backdrop | `--search-radius`, `--search-border`, `--search-length`, `--search-transparency` |
 | `geek` | Baseline only (`border: none` + `border-bottom`) | `--search-border`, `--search-length`, `--search-transparency` |
+| `glow` | Borderless opaque card (white in light, black in dark), rounded through `--search-radius`, lifted by a centred halo plus a drop shadow | `--search-radius`, `--search-length`, `--search-transparency` (the shadow reads `--glow`) |
 
 - **The properties belong on the root.** Custom properties inherit downwards only, and `.main` — an *ancestor* of the form — sizes its own `max-width` from `--search-length`. Writing them on `#search-form` hides the value from `.main`, which then clamps the box and makes the length setting look inert above that ceiling. `.main` uses `max-width: calc(var(--search-length, 500px) + var(--page-pad) * 2)` and centres with `margin: 0 auto`. **Never put a flat `max-width` back on `.main`** (it was `600px`). `#app` must keep `width: 100%`: the body is a centring flexbox, so otherwise the app shrinks to its content width.
-- **Transparency is published as a bare number** (`--search-transparency: 60`), not `60%`, because the rule does arithmetic: `opacity: calc(1 - var(--search-transparency, 0) / 100)`. A `px`/`%` tail makes the `calc()` invalid and the declaration is dropped, leaving the box stuck opaque. `styleValue()` decides this from `spec.unit` — `px` settings travel with their unit, `%` ones bare. It is applied to `.search-box` (the wrapper around field + placeholder + Go button), so it behaves identically on both styles.
+- **Transparency is published as a bare number** (`--search-transparency: 60`), not `60%`, because the rule does arithmetic: `opacity: calc(1 - var(--search-transparency, 0) / 100)`. A `px`/`%` tail makes the `calc()` invalid and the declaration is dropped, leaving the box stuck opaque. `styleValue()` decides this from `spec.unit` — `px` settings travel with their unit, `%` ones bare. It is applied to `.search-box` (the wrapper around field + placeholder + Go button), so it behaves identically on all three styles.
 - **`0` means "keep the default" for every numeric setting and is always accepted**: `isValidLimit()` returns true for `0` regardless of `min`; `readLimit()` turns a stored `0` back into `spec.default`. Only set a `min` above 0 to express the smallest *meaningful* value, not to forbid 0. `transparency` is the single spec where `default === 0` falls **below** its own `min` — hence `test_settings.js` asserts `min <= default < max` only over the three px specs.
 - `SEARCH_LIMITS` is the single source of truth; the CSS `var(--x, <default>)` fallbacks exist only so a bare `newtab.html` paints before JS runs, and the suite asserts the two stay in step.
-- The radius is written even for `geek` (whose rule hard-codes `border-radius: 0`) so switching styles back and forth cannot lose the value.
+- The radius is written even for `geek` (whose rule hard-codes `border-radius: 0`) so switching styles back and forth cannot lose the value, and the border weight rides along the same way.
+- **`glow` is the one style that offers no border tile.** It draws no border, takes its radius from `--search-radius` like `modern`, and fills with an opaque `var(--bg)`. It separates itself from the page with two `box-shadow` layers built from `--glow`: one centred halo that ring-frames all four sides, plus the drop shadow underneath. A single offset shadow leaves the top edge bare, and the top edge matters most on a card the same colour as the page. The dark blocks use a neutral grey at a stronger alpha than `:root`'s black — not pure white, which reads as glare on black; with page and card both `#000` the halo is the only thing drawing the card's edge. `test_settings.js` asserts the dark grey is neutral and below white, keeps an alpha of at least 0.5, and agrees across both dark blocks. Adding `--search-border` back into its rule would make the border tile silently ineffective.
 - The dialog's range hint is built from the single `rangeHint` template filled from `SEARCH_LIMITS` — never hard-code a range or a unit, and never add a flag-selected second wording. `unit` is what the tile's status line prints too, so the panel and dialog cannot disagree.
 
 ### 6.3 Custom CSS

@@ -21,6 +21,12 @@
   --stripe: rgba(0, 0, 0, 0.02);
   --blur-bg: rgba(255, 255, 255, 0.2);
   --blur-bg-focus: rgba(255, 255, 255, 0.3);
+  /* The haze that lifts the borderless "glow" search box off the page. A black
+     one reads on the light page; the dark blocks swap it for a neutral grey --
+     a black shadow on black is no shadow, and a pure white one reads as glare.
+     The dark alpha runs stronger: there the page and the card are the same
+     black, so the halo is the only thing drawing the card's edge. */
+  --glow: rgba(0, 0, 0, 0.28);
   /* The palette's only hue. Restated in both dark blocks below, like every
      other colour token -- a red that reads on white is muddy on black and vice
      versa, so one shared literal cannot serve both. Exactly one rule uses it,
@@ -45,6 +51,7 @@
   --stripe: rgba(255, 255, 255, 0.07);
   --blur-bg: rgba(30, 30, 30, 0.2);
   --blur-bg-focus: rgba(40, 40, 40, 0.3);
+  --glow: rgba(170, 170, 170, 0.65);
   --warn: #ff6b6b;
 }
 
@@ -59,6 +66,7 @@
     --stripe: rgba(255, 255, 255, 0.07);
     --blur-bg: rgba(30, 30, 30, 0.2);
     --blur-bg-focus: rgba(40, 40, 40, 0.3);
+    --glow: rgba(170, 170, 170, 0.65);
     --warn: #ff6b6b;
   }
 }
@@ -81,9 +89,24 @@ body.bg-blank {
   background-image: none;
 }
 
-body.bg-dots {
+/* The dots sit on a fixed pseudo-element, not on `body` itself, because the
+   outward fade is a mask -- applied to `body` it would fade the page's content
+   too. `z-index: -1` on a positioned box paints behind the content but above
+   the canvas, which is exactly where the pattern used to live. */
+body.bg-dots::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
   background-image: radial-gradient(circle, var(--dot) 1.5px, transparent 1.5px);
   background-size: 32px 32px;
+  /* Dense under the search box, faint at the edges, gone in the corners. The
+     gradient is an ellipse so it follows the viewport: with the box's own
+     aspect ratio the four edge midpoints all land at ~71% of the run, where
+     the dots are down to about a sixth of their centre opacity. */
+  -webkit-mask-image: radial-gradient(ellipse at center, #000 0%, #000 20%, transparent 80%);
+  mask-image: radial-gradient(ellipse at center, #000 0%, #000 20%, transparent 80%);
 }
 
 body.bg-stripes {
@@ -196,9 +219,10 @@ body.bg-stripes {
      max-width; the fallback is what a bare newtab.html paints before JS runs. */
   max-width: var(--search-length, 500px);
   margin: 0 auto;
-  /* Box transparency, shared by both styles. The fade wraps the whole box --
+  /* Box transparency, shared by every style. The fade wraps the whole box --
      field, placeholder and Go button together -- so it means the same thing
-     whether the frame is a full box or a bare underline. --search-transparency
+     whether the frame is a full box, a bare underline or a glow card.
+     --search-transparency
      holds the transparency in percent, hence the inversion; the fallback 0 is
      the box exactly as it has always been drawn, and matches
      SEARCH_LIMITS.transparency.default. */
@@ -269,11 +293,12 @@ body.bg-stripes {
   display: none;
 }
 
-/* Search box styles. The two styles differ only in their frame: "modern" is a
-   full box, "geek" drops the sides and keeps a heavier baseline. Corner radius
-   (modern only), border weight and box length are custom properties written on
-   the root element by updateSearchStyle(); the values here are the fallbacks a
-   bare newtab.html paints before JS runs. A weight of 1px and a radius of 8px
+/* Search box styles. Each style differs only in its frame: "modern" is a full
+   box, "geek" drops the sides and keeps a heavier baseline, and "glow" is a
+   borderless opaque card lifted off the page by a halo. Corner radius (modern
+   and glow) and border weight (modern and geek) are custom properties written
+   on the root element by updateSearchStyle(); the values here are the fallbacks
+   a bare newtab.html paints before JS runs. A weight of 1px and a radius of 8px
    are the defaults. */
 
 /* Modern */
@@ -309,6 +334,34 @@ body.bg-stripes {
 }
 
 .style-geek .search-input:has(~ .search-go.hidden) {
+  padding-right: 1.25rem;
+}
+
+/* Glow. A borderless, fully opaque card -- white on the light page, black on
+   the dark one -- whose only separation from the background is the halo around
+   it: one centred layer that surrounds all four sides and one drop shadow under
+   it. A single offset shadow left the top edge bare, which is the edge a
+   same-coloured card needs most. It takes the corner radius from the root
+   property like the modern box, but draws no border. On focus the halo widens;
+   there is no border to change colour, and the field still has to show that it
+   has focus. */
+.style-glow .search-input {
+  border: none;
+  border-radius: var(--search-radius, 8px);
+  padding-right: 5rem;
+  background: var(--bg);
+  box-shadow:
+    0 0 44px -8px var(--glow),
+    0 18px 60px -10px var(--glow);
+}
+
+.style-glow .search-input:focus {
+  box-shadow:
+    0 0 58px -6px var(--glow),
+    0 22px 76px -8px var(--glow);
+}
+
+.style-glow .search-input:has(~ .search-go.hidden) {
   padding-right: 1.25rem;
 }
 

@@ -472,6 +472,99 @@ const HTML_ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'
 function escapeHTML(str) {
   return String(str).replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
 }
+// Syntax highlighting for the custom CSS editor, modelled on VS Code's default
+// Light+/Dark+ CSS palette. A textarea can paint only one colour, so the dialog
+// renders this markup into a <pre> behind a transparent field; the `tok-*`
+// classes are all the stylesheet may colour, and nothing outside that editor
+// reads them.
+//
+// This is a deliberately small tokenizer, not a CSS parser: brace depth plus
+// "a declaration starts here" (after `{` or `;`) is enough to tell a property
+// name (an identifier followed by `:` at declaration start) from a selector at
+// depth 0. Comments, strings, at-rules, hex colours and numbers are recognised
+// wherever they appear; everything else is emitted as plain text. Every token
+// is escaped on the way out, so a stylesheet can never inject markup into the
+// dialog -- and no input can make the loop stall.
+function highlightCSS(source) {
+  const text = String(source == null ? "" : source);
+  let out = "";
+  let i = 0;
+  let depth = 0;
+  let declStart = false;
+  const emit = (cls, s) => {
+    out += cls ? `<span class="tok-${cls}">${escapeHTML(s)}</span>` : escapeHTML(s);
+  };
+  while (i < text.length) {
+    const rest = text.slice(i);
+    let m;
+    if (rest.startsWith("/*")) {
+      const end = text.indexOf("*/", i + 2);
+      const stop = end < 0 ? text.length : end + 2;
+      emit("comment", text.slice(i, stop));
+      i = stop;
+      continue;
+    }
+    if ((m = /^"(?:\\[\s\S]|[^"\\\n])*"?|^'(?:\\[\s\S]|[^'\\\n])*'?/.exec(rest))) {
+      emit("string", m[0]);
+      i += m[0].length;
+      continue;
+    }
+    if ((m = /^@[-\w]+/.exec(rest))) {
+      emit("at-rule", m[0]);
+      i += m[0].length;
+      continue;
+    }
+    if ((m = /^#[\da-fA-F]{3,8}(?![\w-])/.exec(rest))) {
+      emit("string", m[0]);
+      i += m[0].length;
+      continue;
+    }
+    if ((m = /^-?(?:\d*\.\d+|\d+)(?:%|[a-zA-Z]+)?/.exec(rest))) {
+      emit("number", m[0]);
+      i += m[0].length;
+      continue;
+    }
+    if ((m = /^[A-Za-z_-][\w-]*/.exec(rest))) {
+      const after = text.slice(i + m[0].length, i + m[0].length + 16);
+      const isProperty = depth > 0 && declStart && /^\s*:/.test(after);
+      emit(isProperty ? "property" : depth > 0 ? "value" : "selector", m[0]);
+      if (isProperty) declStart = false;
+      i += m[0].length;
+      continue;
+    }
+    const ch = text[i];
+    if (ch === "{") {
+      depth++;
+      declStart = true;
+      emit("", ch);
+      i++;
+      continue;
+    }
+    if (ch === "}") {
+      depth = Math.max(0, depth - 1);
+      declStart = false;
+      emit("", ch);
+      i++;
+      continue;
+    }
+    if (ch === ";" && depth > 0) {
+      declStart = true;
+      emit("", ch);
+      i++;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      m = /^\s+/.exec(rest);
+      emit("", m[0]);
+      i += m[0].length;
+      continue;
+    }
+    m = /^[^\s{};]+/.exec(rest);
+    emit(depth > 0 ? "value" : "selector", m[0]);
+    i += m[0].length;
+  }
+  return out;
+}
 // Shortcuts are one JSON array under a single key, capped at SHORTCUT_MAX
 // entries: { title, url, weight }. Every read goes through the sanitiser --
 // localStorage is hand-writable, and a half-written array must not be able to
@@ -1314,11 +1407,21 @@ function openSettingsDialog(item, card) {
     // The action row does carry a caveat, though: a sheet can hide or unmount the
     // panel that would undo it, so the warning sits in the row rather than in an
     // error line, which only ever reports a refused value.
+    //
+    // The <pre> behind the field is the syntax highlighting: a textarea can only
+    // paint one colour, so the colours live in a mirrored copy and the field's
+    // own glyphs are transparent (the caret is not). The copy is repainted on
+    // input and follows the field's scroll; it is aria-hidden because the
+    // textarea is still the control, and pointer-events: none keeps it out of
+    // the way of selection and clicks.
     body.innerHTML = `
       <div class="settings-dialog-field">
-        <textarea class="settings-dialog-input settings-dialog-textarea" spellcheck="false"
-                  autocomplete="off" aria-label="${t(item.labelKey)}"
-                  placeholder="${t("customCSSHint")}"></textarea>
+        <div class="settings-code">
+          <pre class="settings-code-highlight" aria-hidden="true"><code></code></pre>
+          <textarea class="settings-dialog-input settings-dialog-textarea settings-code-input" spellcheck="false"
+                    autocomplete="off" aria-label="${t(item.labelKey)}"
+                    placeholder="${t("customCSSHint")}"></textarea>
+        </div>
       </div>
       <div class="settings-dialog-actions">
         <span class="settings-dialog-warning">${t("customCSSWarning")}</span>
@@ -1326,7 +1429,20 @@ function openSettingsDialog(item, card) {
       </div>
     `;
     const area = body.querySelector(".settings-dialog-textarea");
+    const pre = body.querySelector(".settings-code-highlight");
+    const code = body.querySelector(".settings-code-highlight code");
+    const paint = () => {
+      // A trailing newline would collapse against the closing tag, leaving the
+      // overlay one line shorter than the field. A zero-width space keeps that
+      // last empty line real, so both scroll to the same height.
+      const shown = area.value.endsWith("\n") ? area.value + "\u200b" : area.value;
+      code.innerHTML = highlightCSS(shown);
+      pre.scrollTop = area.scrollTop;
+    };
     area.value = readCustomCSS();
+    paint();
+    area.addEventListener("input", paint);
+    area.addEventListener("scroll", () => { pre.scrollTop = area.scrollTop; });
     revealSettingsDialog();
     area.focus();
     return;

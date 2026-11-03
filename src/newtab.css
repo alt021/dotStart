@@ -24,9 +24,25 @@
   /* The haze that lifts the borderless "glow" search box off the page. A black
      one reads on the light page; the dark blocks swap it for a neutral grey --
      a black shadow on black is no shadow, and a pure white one reads as glare.
-     The dark alpha runs stronger: there the page and the card are the same
-     black, so the halo is the only thing drawing the card's edge. */
+     The dark alpha runs stronger, because there the halo carries most of the
+     card's edge. */
   --glow: rgba(0, 0, 0, 0.28);
+  /* The glow card's own plate. White here, exactly the light page's --bg, so
+     the style looks unchanged there; the dark blocks lift it to a grey so the
+     box reads as a surface on the black page rather than a hole in it. Only
+     .style-glow reads this token -- modern and geek keep their frames. */
+  --glow-surface: #fff;
+  /* The custom CSS editor's token colours, taken from VS Code's default Light+
+     CSS palette. These are source-code colours, not part of the page palette:
+     they are read only by the .tok-* rules inside .settings-code, and no UI
+     surface uses them. The dark blocks restate them like every other colour. */
+  --code-comment: #008000;
+  --code-atrule: #af00db;
+  --code-selector: #800000;
+  --code-property: #0451a5;
+  --code-value: #000;
+  --code-string: #a31515;
+  --code-number: #098658;
   /* The palette's only hue. Restated in both dark blocks below, like every
      other colour token -- a red that reads on white is muddy on black and vice
      versa, so one shared literal cannot serve both. Exactly one rule uses it,
@@ -51,7 +67,15 @@
   --stripe: rgba(255, 255, 255, 0.07);
   --blur-bg: rgba(30, 30, 30, 0.2);
   --blur-bg-focus: rgba(40, 40, 40, 0.3);
-  --glow: rgba(170, 170, 170, 0.65);
+  --glow: rgba(170, 170, 170, 0.45);
+  --glow-surface: #1e1e1e;
+  --code-comment: #6a9955;
+  --code-atrule: #c586c0;
+  --code-selector: #d7ba7d;
+  --code-property: #9cdcfe;
+  --code-value: #d4d4d4;
+  --code-string: #ce9178;
+  --code-number: #b5cea8;
   --warn: #ff6b6b;
 }
 
@@ -66,7 +90,15 @@
     --stripe: rgba(255, 255, 255, 0.07);
     --blur-bg: rgba(30, 30, 30, 0.2);
     --blur-bg-focus: rgba(40, 40, 40, 0.3);
-    --glow: rgba(170, 170, 170, 0.65);
+    --glow: rgba(170, 170, 170, 0.45);
+    --glow-surface: #1e1e1e;
+    --code-comment: #6a9955;
+    --code-atrule: #c586c0;
+    --code-selector: #d7ba7d;
+    --code-property: #9cdcfe;
+    --code-value: #d4d4d4;
+    --code-string: #ce9178;
+    --code-number: #b5cea8;
     --warn: #ff6b6b;
   }
 }
@@ -337,19 +369,20 @@ body.bg-stripes {
   padding-right: 1.25rem;
 }
 
-/* Glow. A borderless, fully opaque card -- white on the light page, black on
-   the dark one -- whose only separation from the background is the halo around
-   it: one centred layer that surrounds all four sides and one drop shadow under
-   it. A single offset shadow left the top edge bare, which is the edge a
-   same-coloured card needs most. It takes the corner radius from the root
-   property like the modern box, but draws no border. On focus the halo widens;
-   there is no border to change colour, and the field still has to show that it
-   has focus. */
+/* Glow. A borderless, fully opaque card -- white on the light page, a grey
+   plate on the dark one -- separated from the background by that plate and by
+   a halo around it: one centred layer that surrounds all four sides and one
+   drop shadow under it. A single offset shadow left the top edge bare, which is
+   the edge a same-coloured card needs most. It takes the corner radius from the
+   root property like the modern box, but draws no border, and the plate colour
+   comes from --glow-surface so only this style changes between themes. On focus
+   the halo widens; there is no border to change colour, and the field still has
+   to show that it has focus. */
 .style-glow .search-input {
   border: none;
   border-radius: var(--search-radius, 8px);
   padding-right: 5rem;
-  background: var(--bg);
+  background: var(--glow-surface, var(--bg));
   box-shadow:
     0 0 44px -8px var(--glow),
     0 18px 60px -10px var(--glow);
@@ -823,6 +856,65 @@ body.bg-stripes {
   font-size: 0.8rem;
   line-height: 1.5;
 }
+
+/* Syntax highlighting for the CSS editor. The coloured copy is a <pre> behind
+   the field, because a textarea can paint only one colour: the field's own
+   glyphs are transparent (its caret and placeholder are not), and the copy is
+   painted by highlightCSS() on every input. The metrics below must match the
+   textarea exactly -- same border width, padding, font, size, line-height and
+   wrapping -- or the two texts drift apart by a pixel per line. The field's
+   scrollbar is hidden so its content width stays the copy's width; the copy is
+   pointer-transparent and follows the field's scroll from JS. */
+.settings-code {
+  position: relative;
+}
+.settings-code .settings-code-highlight {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  border: 1px solid transparent;
+  padding: 0.5rem 0.7rem;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+.settings-code .settings-code-highlight code {
+  font: inherit;
+}
+.settings-code .settings-dialog-textarea {
+  position: relative;
+  z-index: 1;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--fg);
+  scrollbar-width: none;
+}
+.settings-code .settings-dialog-textarea::placeholder {
+  color: var(--placeholder);
+}
+/* The selection tint is translucent on purpose: an opaque one would hide the
+   coloured copy painted underneath the transparent field, leaving a blank block
+   while text is selected. */
+.settings-code .settings-dialog-textarea::selection {
+  background: rgba(0, 120, 215, 0.3);
+  color: transparent;
+}
+.settings-code .settings-dialog-textarea::-webkit-scrollbar {
+  display: none;
+}
+.settings-code .tok-comment { color: var(--code-comment); }
+.settings-code .tok-at-rule { color: var(--code-atrule); }
+.settings-code .tok-selector { color: var(--code-selector); }
+.settings-code .tok-property { color: var(--code-property); }
+.settings-code .tok-value { color: var(--code-value); }
+.settings-code .tok-string { color: var(--code-string); }
+.settings-code .tok-number { color: var(--code-number); }
 
 /* The custom CSS gate: the stage that stands between the tile and the editor on
    a first switch-on. It replaces the *contents* of the same dialog, so the width

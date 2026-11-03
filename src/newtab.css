@@ -601,6 +601,33 @@ body.bg-stripes {
   text-overflow: ellipsis;
 }
 
+/* The tile while it is acting as the dialog's origin. Its box stays in the
+   strip, so the panel does not reflow; only its pixels step aside for the
+   stand-in that is morphing into the dialog. */
+.settings-card.morph-source {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* The clicked tile's stand-in during the morph. It reuses the card's own markup
+   and styling, pinned to the viewport at the tile's rect, so the growth starts
+   from exactly the pixels that were clicked instead of from a copy appearing
+   somewhere else. It is inert and never takes a pointer. */
+.settings-card-ghost {
+  position: fixed;
+  z-index: 1;
+  margin: 0;
+  pointer-events: none;
+  transition: opacity 0.14s ease;
+}
+
+.settings-card-ghost .settings-card {
+  width: 100%;
+  height: 100%;
+  flex: none;
+  cursor: default;
+}
+
 /* Dialog for multi-value settings */
 .settings-dialog-overlay {
   position: fixed;
@@ -610,10 +637,26 @@ body.bg-stripes {
   display: none;
   align-items: center;
   justify-content: center;
+  transition: background-color 0.26s ease;
 }
 
 .settings-dialog-overlay.visible {
   display: flex;
+  animation: settings-dialog-backdrop-in 0.22s ease;
+}
+
+/* The backdrop follows the dialog out: the tile collapse happens over the page
+   the dialog interrupted, not over a darkening rectangle. */
+.settings-dialog-overlay.closing {
+  background: transparent;
+  /* The dialog is logically dismissed the moment it starts collapsing, so the
+     page underneath should accept clicks again immediately. */
+  pointer-events: none;
+}
+
+@keyframes settings-dialog-backdrop-in {
+  from { background-color: transparent; }
+  to { background-color: rgba(0, 0, 0, 0.35); }
 }
 
 .settings-dialog {
@@ -624,7 +667,50 @@ body.bg-stripes {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 0;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+  /* The morph maps the dialog's top-left onto the tile's top-left, so the
+     origin has to stay there while the transform animates. */
+  transform-origin: top left;
+}
+
+/* The tile-to-dialog morph. The dialog itself starts life as a scaled, shifted
+   copy of the clicked card, then takes on its own size and position; its
+   contents are faded separately so the text never rides the scale. `closing`
+   comes after the entrance rules on purpose: same specificity, later wins, and
+   the exit must be able to override an entrance that is still in flight. */
+.settings-dialog.morphing .settings-dialog-header,
+.settings-dialog.morphing .settings-dialog-options {
+  opacity: 0;
+}
+
+.settings-dialog.morphing-active {
+  transition: transform 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.settings-dialog.morphing-active .settings-dialog-header,
+.settings-dialog.morphing-active .settings-dialog-options {
+  opacity: 1;
+  transition: opacity 0.16s ease 0.09s;
+}
+
+.settings-dialog.closing {
+  pointer-events: none;
+  transition: transform 0.26s cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+.settings-dialog.closing .settings-dialog-header,
+.settings-dialog.closing .settings-dialog-options {
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-dialog-overlay.visible {
+    animation: none;
+  }
+  .settings-dialog.morphing-active,
+  .settings-dialog.closing {
+    transition: none;
+  }
 }
 
 .settings-dialog-header {

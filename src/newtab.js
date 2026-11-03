@@ -841,6 +841,29 @@ let settingsTab = "appearance";
 let settingsPanelEl = null;
 let settingsDialogEl = null;
 let settingsDialogItem = null;
+// The tile-to-dialog morph. A dialog opened from a card starts life as that
+// card's pixels, then grows upward and outward from that spot -- its bottom and
+// horizontal centre stay with the tile instead of moving to the screen centre --
+// and collapses back onto the same spot on the way out. `settingsMorphSource`
+// holds what the exit needs -- the action (to re-find the card after a
+// re-render), its viewport rect and a copy of the card's markup for the
+// stand-in. It stays null when the dialog was opened without a card, and for the
+// custom CSS stages on purpose: that dialog keeps its centred position and never
+// animates. With a null source every animation is skipped and the old instant
+// open/close behaviour applies (the smoke suite drives it that way).
+let settingsMorphSource = null;
+let settingsDialogMorphTimer = null;
+let settingsDialogGhost = null;
+let settingsDialogClosing = false;
+// The dialog's natural, untransformed rect, captured when it was revealed. The
+// exit animation needs it while an entrance is still in flight, when
+// getBoundingClientRect() would report the transformed box instead.
+let settingsDialogRect = null;
+const SETTINGS_MORPH_MS = 260;
+// How far the tile-opened dialog keeps from the viewport's edges when the tile
+// sits near one. The dialog is deliberately not centred: it is placed around the
+// tile, and only this clamp may shift it.
+const SETTINGS_DIALOG_MARGIN = 12;
 // The custom CSS dialog's first switch-on opens on a gate rather than on its
 // editor, and the gate's confirm button stays locked for this many seconds. One
 // number, so tuning the pause is a one-line change.
@@ -1005,6 +1028,10 @@ function renderSettingsPanel() {
     btn.setAttribute("aria-selected", btn.dataset.tab === settingsTab ? "true" : "false");
   });
   settingsPanelEl.querySelector(".settings-content").innerHTML = getSettingsContentHTML();
+  // A setting applied from the dialog re-renders the strip while the dialog is
+  // still collapsing onto the old card. The new card has to stay hidden until
+  // the collapse finishes, or the tile would flash back mid-animation.
+  if (settingsMorphSource) hideMorphSourceCard();
 }
 function openSettingsPanel() {
   if (!settingsPanelEl) return;
@@ -1016,6 +1043,104 @@ function closeSettingsPanel() {
 }
 function settingsPanelVisible() {
   return !!settingsPanelEl && settingsPanelEl.classList.contains("visible");
+}
+// Everything below expresses the morph in viewport pixels, so it has to read the
+// layout instead of assuming it. The test stubs have no layout at all (their
+// rects are zero-sized), which is what makes every animation degrade to the
+// previous instant behaviour there without a separate code path.
+function measureRect(el) {
+  if (!el || typeof el.getBoundingClientRect !== "function") return null;
+  const rect = el.getBoundingClientRect();
+  if (!rect || !rect.width || !rect.height) return null;
+  return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+}
+function runNextFrame(fn) {
+  if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+    window.requestAnimationFrame(fn);
+  } else {
+    setTimeout(fn, 0);
+  }
+}
+function prefersReducedMotion() {
+  return typeof window !== "undefined" && typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+// The transform that makes `from`'s box sit exactly on `to`'s, as long as the
+// dialog's transform-origin is its top-left corner.
+function morphTransform(from, to) {
+  const sx = from.width / to.width;
+  const sy = from.height / to.height;
+  return `translate(${from.left - to.left}px, ${from.top - to.top}px) scale(${sx}, ${sy})`;
+}
+function clearSettingsDialogPlacement(dialog) {
+  dialog.style.position = "";
+  dialog.style.left = "";
+  dialog.style.top = "";
+}
+// The tile-opened dialog does not travel to the screen centre: its bottom edge
+// and horizontal centre stay on the tile, so it grows upward and out to both
+// sides. The clamp is the only thing that may displace it, and only where the
+// tile sits close enough to an edge that the full box would not fit.
+function placeSettingsDialog(dialog, source, natural) {
+  const vw = (typeof window !== "undefined" && window.innerWidth) || 0;
+  const vh = (typeof window !== "undefined" && window.innerHeight) || 0;
+  if (!vw || !vh) return natural;
+  const maxLeft = Math.max(SETTINGS_DIALOG_MARGIN, vw - natural.width - SETTINGS_DIALOG_MARGIN);
+  const maxTop = Math.max(SETTINGS_DIALOG_MARGIN, vh - natural.height - SETTINGS_DIALOG_MARGIN);
+  const left = Math.min(
+    Math.max(source.left + source.width / 2 - natural.width / 2, SETTINGS_DIALOG_MARGIN),
+    maxLeft);
+  const top = Math.min(
+    Math.max(source.top + source.height - natural.height, SETTINGS_DIALOG_MARGIN),
+    maxTop);
+  dialog.style.position = "absolute";
+  dialog.style.left = `${left}px`;
+  dialog.style.top = `${top}px`;
+  return { left, top, width: natural.width, height: natural.height };
+}
+function hideMorphSourceCard() {
+  if (!settingsMorphSource || !settingsPanelEl) return;
+  const card = settingsPanelEl.querySelector(
+    `.settings-card[data-action="${settingsMorphSource.action}"]`);
+  if (card) {
+    card.classList.add("morph-source");
+    // A re-render replaces the card, so keep pointing at the live one; the
+    // original element is detached and no longer worth touching.
+    settingsMorphSource.card = card;
+  }
+}
+function unhideMorphSourceCard() {
+  if (settingsMorphSource && settingsMorphSource.card) {
+    settingsMorphSource.card.classList.remove("morph-source");
+  }
+  if (!settingsPanelEl || typeof settingsPanelEl.querySelectorAll !== "function") return;
+  settingsPanelEl.querySelectorAll(".settings-card.morph-source").forEach((card) => {
+    card.classList.remove("morph-source");
+  });
+}
+function removeSettingsGhost() {
+  if (settingsDialogGhost) {
+    settingsDialogGhost.remove();
+    settingsDialogGhost = null;
+  }
+}
+// The stand-in for the clicked tile while the dialog is growing out of it (and
+// back into it). Same markup as the card, pinned to the viewport at the card's
+// own rect, so the growth appears to start from the tile itself rather than
+// from a copy floating elsewhere.
+function addSettingsGhost(html, rect) {
+  if (!settingsDialogEl) return null;
+  removeSettingsGhost();
+  const ghost = document.createElement("div");
+  ghost.className = "settings-card-ghost";
+  ghost.innerHTML = html;
+  ghost.style.left = `${rect.left}px`;
+  ghost.style.top = `${rect.top}px`;
+  ghost.style.width = `${rect.width}px`;
+  ghost.style.height = `${rect.height}px`;
+  settingsDialogEl.appendChild(ghost);
+  settingsDialogGhost = ghost;
+  return ghost;
 }
 // Placeholder for the number dialog: it states the range the field accepts and
 // what the "keep the default" entry resolves to, so the field never asks for a
@@ -1035,15 +1160,84 @@ function flagDialogError(errorEl, inputEl, message) {
   inputEl.focus();
   if (typeof inputEl.select === "function") inputEl.select();
 }
-function openSettingsDialog(item) {
+// Shows the overlay and grows the dialog out of the tile it was opened from.
+// The tile-opened dialog is placed around that tile (its bottom edge and
+// horizontal centre stay on it), not at the screen centre, before its target
+// rect is read -- so the transform has a fixed destination even while the
+// entrance is in flight. A source-less open -- the custom CSS gate and its
+// editor, and every programmatic open -- keeps the overlay's centred layout and
+// never animates. With no measurable rect (the stub harness), it just shows the
+// overlay -- the pre-morph behaviour, unchanged.
+function revealSettingsDialog() {
   if (!settingsDialogEl) return;
+  const overlay = settingsDialogEl;
+  const dialog = overlay.querySelector(".settings-dialog");
+  overlay.classList.remove("closing");
+  overlay.classList.add("visible");
+  if (!dialog) return;
+  dialog.classList.remove("closing");
+  clearSettingsDialogPlacement(dialog);
+  const natural = measureRect(dialog);
+  if (!natural) {
+    settingsDialogRect = null;
+    return;
+  }
+  const source = settingsMorphSource;
+  const target = source ? placeSettingsDialog(dialog, source.rect, natural) : natural;
+  settingsDialogRect = target;
+  if (!source || prefersReducedMotion()) return;
+  dialog.classList.add("morphing");
+  dialog.style.transformOrigin = "top left";
+  dialog.style.transform = morphTransform(source.rect, target);
+  // Force the start transform to be the "before" style, so the next frame's
+  // identity transform is a transition and not a jump.
+  void dialog.offsetWidth;
+  runNextFrame(() => {
+    if (!dialog.classList.contains("morphing")) return;
+    dialog.classList.add("morphing-active");
+    dialog.style.transform = "translate(0px, 0px) scale(1, 1)";
+  });
+  const ghost = addSettingsGhost(source.html, source.rect);
+  if (ghost) {
+    // The stand-in starts on the tile and dissolves as the dialog's own
+    // contents fade in underneath it.
+    ghost.style.opacity = "1";
+    runNextFrame(() => {
+      if (ghost === settingsDialogGhost) ghost.style.opacity = "0";
+    });
+  }
+  clearTimeout(settingsDialogMorphTimer);
+  settingsDialogMorphTimer = setTimeout(() => {
+    dialog.classList.remove("morphing", "morphing-active");
+    dialog.style.transform = "";
+    removeSettingsGhost();
+    settingsDialogMorphTimer = null;
+  }, SETTINGS_MORPH_MS + 40);
+}
+function openSettingsDialog(item, card) {
+  if (!settingsDialogEl) return;
+  if (settingsDialogClosing) finishSettingsDialogClose();
+  const isCSS = item.kind === "css";
+  // A dialog opened from a tile remembers the tile: its rect is where the morph
+  // starts and ends, and its markup is the stand-in that dissolves while the box
+  // grows. The custom CSS stages are the exception -- they keep the centred
+  // position and open with no animation, so they never take a source. A
+  // programmatic open (the suite) has no card and stays source-less too.
+  if (card && !isCSS) {
+    const rect = measureRect(card);
+    settingsMorphSource = rect
+      ? { action: item.action, rect, html: cardHTML(item), card }
+      : null;
+    if (rect) card.classList.add("morph-source");
+  } else {
+    settingsMorphSource = null;
+  }
   settingsDialogItem = item;
   const titleEl = settingsDialogEl.querySelector(".settings-dialog-title");
   const body = settingsDialogEl.querySelector(".settings-dialog-options");
   const dialog = settingsDialogEl.querySelector(".settings-dialog");
   const isNumber = item.kind === "number";
   const isShortcut = item.kind === "shortcut";
-  const isCSS = item.kind === "css";
   // The one path that can take a working page and break it opens on a gate: the
   // warning is read *before* the editor, never after a save. "First switch-on"
   // is two derived facts: customCSSEnabled() reports the same thing the tile
@@ -1106,7 +1300,7 @@ function openSettingsDialog(item) {
         errorEl.textContent = "";
       });
     });
-    settingsDialogEl.classList.add("visible");
+    revealSettingsDialog();
     fields.title.focus();
     return;
   }
@@ -1133,7 +1327,7 @@ function openSettingsDialog(item) {
     `;
     const area = body.querySelector(".settings-dialog-textarea");
     area.value = readCustomCSS();
-    settingsDialogEl.classList.add("visible");
+    revealSettingsDialog();
     area.focus();
     return;
   }
@@ -1159,7 +1353,7 @@ function openSettingsDialog(item) {
       input.classList.remove("invalid");
       errorEl.textContent = "";
     });
-    settingsDialogEl.classList.add("visible");
+    revealSettingsDialog();
     input.focus();
     input.select();
     return;
@@ -1170,7 +1364,7 @@ function openSettingsDialog(item) {
       ${t(labelKey)}
     </button>
   `).join("");
-  settingsDialogEl.classList.add("visible");
+  revealSettingsDialog();
 }
 // Reads the number dialog's field and either applies it or reports why not. A
 // valid 0 is stored as-is: readLimit() turns it back into the default, which is
@@ -1245,7 +1439,7 @@ function openCSSGateStage() {
       <button class="settings-dialog-confirm" type="button" disabled>${cssGateLabel(CSS_GATE_SECONDS)}</button>
     </div>
   `;
-  settingsDialogEl.classList.add("visible");
+  revealSettingsDialog();
   cssGateOpen = true;
   startCSSGateCountdown();
 }
@@ -1354,18 +1548,91 @@ function confirmDeleteShortcut() {
   renderSettingsPanel();
   updateShortcuts();
 }
+// The final teardown, after the exit animation (or immediately, when there is
+// nothing to animate). Undoing the morph classes and the transform *before*
+// dropping `visible` would show the dialog snapping back to full size for a
+// frame, so the overlay is hidden first.
+function finishSettingsDialogClose() {
+  clearTimeout(settingsDialogMorphTimer);
+  settingsDialogMorphTimer = null;
+  settingsDialogClosing = false;
+  removeSettingsGhost();
+  const overlay = settingsDialogEl;
+  if (overlay) {
+    overlay.classList.remove("visible", "closing");
+    const dialog = overlay.querySelector(".settings-dialog");
+    if (dialog) {
+      dialog.classList.remove("morphing", "morphing-active", "closing");
+      dialog.style.transform = "";
+      clearSettingsDialogPlacement(dialog);
+    }
+  }
+  unhideMorphSourceCard();
+  settingsMorphSource = null;
+  settingsDialogRect = null;
+  settingsDialogItem = null;
+}
 // The single exit for every way the dialog can be dismissed -- the close button,
 // Escape, a backdrop click, a finished confirm, the gate handing over to the
 // editor. Keeping it the only exit is what makes "the countdown is always
 // stopped, and the gate is always torn down" true without repeating that cleanup
 // at five call sites.
-function closeSettingsDialog() {
+//
+// A card-opened dialog collapses back onto its tile; everything else closes
+// instantly. `immediate` is for the one dismissal that takes the panel away at
+// the same moment (the right-click that closes the whole sheet): collapsing
+// toward a tile that is already sliding off-screen is noise, not feedback.
+function closeSettingsDialog(immediate) {
   stopCSSGateCountdown();
-  if (settingsDialogEl) settingsDialogEl.classList.remove("visible");
+  const overlay = settingsDialogEl;
+  const wasOpen = settingsDialogVisible();
   settingsDialogItem = null;
+  if (!overlay || !wasOpen) {
+    finishSettingsDialogClose();
+    return;
+  }
+  const dialog = overlay.querySelector(".settings-dialog");
+  const source = settingsMorphSource;
+  if (immediate || prefersReducedMotion() || !dialog || !source) {
+    finishSettingsDialogClose();
+    return;
+  }
+  // The target captured at reveal is the natural box even while the entrance
+  // is still in flight, when getBoundingClientRect() would report the
+  // transformed one. It is also the anchored box a tile-opened dialog settles
+  // on, so the collapse always starts where the dialog actually is.
+  const natural = settingsDialogRect || measureRect(dialog);
+  if (!natural) {
+    finishSettingsDialogClose();
+    return;
+  }
+  settingsDialogClosing = true;
+  overlay.classList.add("closing");
+  dialog.classList.add("closing");
+  // The `closing` class carries the transition; assigning the transform starts
+  // it. Leaving the entrance classes in place (when the entrance is still in
+  // flight) lets the browser interpolate from wherever the box currently is
+  // instead of snapping to full size first.
+  dialog.style.transform = morphTransform(source.rect, natural);
+  const ghost = addSettingsGhost(source.html, source.rect);
+  if (ghost) {
+    // The tile's stand-in fades up only once the box is nearly home, so the
+    // card appears as the dialog lands on it rather than before it shrinks.
+    ghost.style.opacity = "0";
+    ghost.style.transition = "opacity 0.12s ease 0.18s";
+    runNextFrame(() => {
+      if (ghost === settingsDialogGhost) ghost.style.opacity = "1";
+    });
+  }
+  clearTimeout(settingsDialogMorphTimer);
+  settingsDialogMorphTimer = setTimeout(finishSettingsDialogClose, SETTINGS_MORPH_MS + 60);
 }
+// A closing dialog is logically gone the moment the user dismisses it, even
+// though its pixels are still collapsing. Everything that asks "is a dialog
+// open?" reads this, so the exit animation cannot be re-entered.
 function settingsDialogVisible() {
-  return !!settingsDialogEl && settingsDialogEl.classList.contains("visible");
+  return !!settingsDialogEl && settingsDialogEl.classList.contains("visible") &&
+    !settingsDialogClosing;
 }
 // Applies one setting and refreshes whatever the page shows, so a card flip is
 // visible immediately without re-rendering the whole panel.
@@ -1515,7 +1782,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       if (settingsPanelVisible()) {
-        closeSettingsDialog();
+        closeSettingsDialog(true);
         closeSettingsPanel();
       } else {
         openSettingsPanel();
@@ -1542,8 +1809,9 @@ document.addEventListener("DOMContentLoaded", async () => {
                  item.kind === "shortcut" || item.kind === "css") {
         // All four open a dialog: a list of values, one field, the shortcut form
         // (title / url / weight) or the custom CSS sheet. The add tile is a
-        // "shortcut" item with index -1, so it lands here too.
-        openSettingsDialog(item);
+        // "shortcut" item with index -1, so it lands here too. The card itself
+        // is the dialog's point of departure and return.
+        openSettingsDialog(item, card);
       }
     });
     // Vertical wheel scrolls the card strip sideways -- it is the only overflow
